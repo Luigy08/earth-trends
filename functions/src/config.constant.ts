@@ -27,14 +27,15 @@ export const CONFIG = {
   globalSearchDailyQuota: positiveInteger('QUOTA_GLOBAL_SEARCH_DAILY', 2000),
   cacheTtlSeconds: positiveInteger('CACHE_TTL_SECONDS', 86400),
   currentWeather: booleanEnv('CURRENT_WEATHER_ENABLED', true),
-  meteomaticsFallback: booleanEnv('METEOMATICS_FALLBACK', false),
-  useSecretManager: booleanEnv('METEOMATICS_USE_SECRET_MANAGER', false),
+  useSecretManager: booleanEnv('METEOMATICS_USE_SECRET_MANAGER', process.env.FUNCTIONS_EMULATOR !== 'true'),
   quota: {
     interpretQuery: positiveInteger('QUOTA_INTERPRET_QUERY', 20),
     searchLocations: positiveInteger('QUOTA_SEARCH_LOCATIONS', 100),
     createAnalysis: positiveInteger('QUOTA_CREATE_ANALYSIS', 10),
     getAnalysis: positiveInteger('QUOTA_GET_ANALYSIS', 1000),
     createSession: positiveInteger('QUOTA_CREATE_SESSION', 50),
+    meteomaticsAvailability: positiveInteger('QUOTA_METEOMATICS_AVAILABILITY', 30),
+    meteomaticsExecute: positiveInteger('QUOTA_METEOMATICS_EXECUTE', 20),
   },
 } as const;
 

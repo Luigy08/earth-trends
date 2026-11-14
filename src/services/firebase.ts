@@ -2,7 +2,7 @@ import { initializeApp, getApps } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
+import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
 import { ENV_KEYS } from '../app.constant';
 
 const env = import.meta.env;
@@ -16,6 +16,9 @@ async function connect() {
   if (!functions) {
     const app = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
     if (env.VITE_USE_FIREBASE_EMULATORS !== 'true') {
+      if (import.meta.env.DEV && window.location.hostname === 'localhost') {
+        (self as typeof self & { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+      }
       initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
     }
     const auth = getAuth(app);
@@ -50,3 +53,7 @@ export const renameSession = (data: RenameSessionRequest) => call<RenameSessionR
 export const deleteSession = (data: SessionRequest) => call<SessionRequest, DeleteSessionResponse>('deleteSession', data);
 export const chatSession = (data: ChatSessionRequest) => call<ChatSessionRequest, ChatSessionResponse>('chatSession', data);
 export const attachSessionAnalysis = (data: AttachSessionAnalysisRequest) => call<AttachSessionAnalysisRequest, AttachSessionAnalysisResponse>('attachSessionAnalysis', data);
+export const getMeteomaticsCatalog = () => call<Record<string, never>, MeteomaticsCatalogResponse>('getMeteomaticsCatalog', {});
+export const interpretMeteomatics = (data: InterpretMeteomaticsRequest) => call<InterpretMeteomaticsRequest, InterpretMeteomaticsResponse>('interpretMeteomatics', data);
+export const checkMeteomaticsAvailability = (data: MeteomaticsAvailabilityRequest) => call<MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse>('checkMeteomaticsAvailability', data);
+export const executeMeteomaticsQuery = (data: MeteomaticsExecuteRequest) => call<MeteomaticsExecuteRequest, MeteomaticsExecuteResponse>('executeMeteomaticsQuery', data);

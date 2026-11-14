@@ -1,15 +1,8 @@
 import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
-import { NasaPowerProvider } from '../src/providers/nasa';
 import { getCurrentWeather } from '../src/providers/current-weather';
 import { LocationSearch } from '../src/providers/locations';
-import { SourceError } from '../src/http';
 import { location, MemoryCache } from './fixtures.types';
-
-function nasaResponse(unit: string, values: Record<string, number | null>) {
-  return new Response(JSON.stringify({ properties: { parameter: { PRECTOTCORR: values } }, header: { fill_value: -999 },
-    parameters: { PRECTOTCORR: { units: unit } } }), { status: 200 });
-}
 
 test('qualified geocoding searches city alone and filters Spanish, English or ISO country qualifiers', async () => {
   const fetch = mock.method(globalThis, 'fetch', async (url: string) => {
@@ -40,42 +33,6 @@ test('Reykjavik city is not made ambiguous by a fuzzy airport match', async () =
     const result = await new LocationSearch(new MemoryCache()).search('Reykjavik', 3);
     assert.equal(result.length, 1);
     assert.equal(result[0]!.name, 'Reikiavik');
-  } finally { fetch.mock.restore(); }
-});
-
-test('NASA respects metadata, sentinel, missing months, annual summary month13, coordinates and cache', async () => {
-  const fetch = mock.method(globalThis, 'fetch', async (url: string) => {
-    const request = new URL(url);
-    assert.equal(request.searchParams.get('parameters'), 'PRECTOTCORR');
-    assert.equal(request.searchParams.get('latitude'), String(location.latitude));
-    assert.equal(request.searchParams.get('start'), '2020');
-    return nasaResponse('mm/day', { '202001': 2, '202002': -999, '202003': -1, '202013': 50 });
-  });
-  try {
-    const provider = new NasaPowerProvider(new MemoryCache());
-    const series = await provider.getMonthly(location, 'precipitation', 2020, 2020);
-    assert.equal(series.monthly.length, 12);
-    assert.deepEqual(series.monthly.slice(0, 4).map(p => p.value), [2, null, null, null]);
-    assert.equal(series.provenance.provider, 'NASA POWER');
-    assert.deepEqual(series, await provider.getMonthly(location, 'precipitation', 2020, 2020));
-    assert.equal(fetch.mock.callCount(), 1);
-  } finally { fetch.mock.restore(); }
-});
-
-test('NASA rejects changed units rather than silently mis-scaling rainfall', async () => {
-  const fetch = mock.method(globalThis, 'fetch', async () => nasaResponse('mm/month', { '202001': 2 }));
-  try {
-    await assert.rejects(() => new NasaPowerProvider(new MemoryCache()).getMonthly(location, 'precipitation', 2020, 2020), SourceError);
-  } finally { fetch.mock.restore(); }
-});
-
-test('NASA HTTP failure does not enter the successful cache', async () => {
-  const fetch = mock.method(globalThis, 'fetch', async () => new Response('rate limited', { status: 429 }));
-  const provider = new NasaPowerProvider(new MemoryCache());
-  try {
-    await assert.rejects(() => provider.getMonthly(location, 'precipitation', 2020, 2020), SourceError);
-    await assert.rejects(() => provider.getMonthly(location, 'precipitation', 2020, 2020), SourceError);
-    assert.equal(fetch.mock.callCount(), 2);
   } finally { fetch.mock.restore(); }
 });
 

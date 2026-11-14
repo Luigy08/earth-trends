@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { isMeteomaticsParameter } from '../../shared/meteomatics-parameter.resolver';
 
 export const locationSchema = z.object({
   id: z.string().trim().min(1).max(120),
@@ -50,6 +51,43 @@ export const sessionRequestSchema = z.object({ sessionId }).strict();
 export const chatSessionSchema = z.object({ sessionId, message: z.string().trim().min(3).max(1500) }).strict();
 export const renameSessionSchema = z.object({ sessionId, title: z.string().trim().min(1).max(80) }).strict();
 export const attachSessionAnalysisSchema = z.object({ sessionId, analysisId: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+
+const coordinateSchema = z.object({ latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict();
+const meteomaticsDate = z.string().trim().min(1).max(500).regex(/^[0-9A-Za-zTZ:+.,_\-/]+$/);
+export const meteomaticsQuerySchema = z.object({
+  mode: z.enum(['point', 'grid', 'station', 'route', 'polygon', 'trajectory']),
+  source: z.string().regex(/^[A-Za-z0-9._-]{1,80}$/).default('mix'),
+  options: z.object({ calibrated: z.boolean().optional(), mask: z.enum(['land', 'sea']).optional(), ens_select: z.string().regex(/^[A-Za-z0-9:.,_-]{1,100}$/).optional() }).strict().optional(),
+  parameters: z.array(z.string().max(120)).min(1).max(10),
+  validDates: meteomaticsDate,
+  format: z.enum(['json', 'csv', 'xml']).default('json'),
+  point: coordinateSchema.optional(),
+  grid: z.object({ north: z.number().min(-90).max(90), west: z.number().min(-180).max(180), south: z.number().min(-90).max(90), east: z.number().min(-180).max(180), resolution: z.string().regex(/^\d{1,3}x\d{1,3}$/) }).strict().optional(),
+  stationIds: z.array(z.string().regex(/^[A-Za-z0-9_-]{2,40}$/)).min(1).max(100).optional(),
+  route: z.array(coordinateSchema).min(2).max(100).optional(),
+  polygon: z.object({ coordinates: z.array(coordinateSchema).min(3).max(100), aggregate: z.enum(['min', 'max', 'mean', 'median', 'mode']) }).strict().optional(),
+  trajectory: z.array(z.object({ date: z.string().datetime({ offset: true }), latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180), altitude: z.number().finite().min(-500).max(30000).optional() }).strict()).min(1).max(150).optional(),
+}).strict().superRefine((spec, ctx) => {
+  if (spec.parameters.some(parameter => !isMeteomaticsParameter(parameter))) ctx.addIssue({ code: 'custom', message: 'Select parameters from the Meteomatics catalog.', path: ['parameters'] });
+  const fieldByMode = { point: 'point', grid: 'grid', station: 'stationIds', route: 'route', polygon: 'polygon', trajectory: 'trajectory' } as const;
+  const expected = fieldByMode[spec.mode];
+  if (!spec[expected]) ctx.addIssue({ code: 'custom', message: `The ${spec.mode} request requires ${expected}.`, path: [expected] });
+  for (const field of Object.keys(fieldByMode) as Array<keyof typeof fieldByMode>) {
+    const key = fieldByMode[field];
+    if (field !== spec.mode && spec[key] !== undefined) ctx.addIssue({ code: 'custom', message: `${key} is not valid for ${spec.mode} mode.`, path: [key] });
+  }
+  if (spec.grid && spec.grid.north <= spec.grid.south) ctx.addIssue({ code: 'custom', message: 'Grid north must be north of south.', path: ['grid', 'north'] });
+  if (spec.mode === 'station' && spec.source !== 'mix-obs') ctx.addIssue({ code: 'custom', message: 'Station observations require the mix-obs source.', path: ['source'] });
+  if (spec.polygon && spec.polygon.coordinates.length < 3) ctx.addIssue({ code: 'custom', message: 'A polygon requires at least three coordinates.', path: ['polygon', 'coordinates'] });
+  if (spec.mode === 'route') {
+    const dates = spec.validDates.split(',');
+    if (dates.length !== spec.route?.length) ctx.addIssue({ code: 'custom', message: 'Route mode requires one timestamp per route location.', path: ['validDates'] });
+  }
+  if (spec.mode === 'trajectory' && spec.parameters.some(parameter => /_\*m:/.test(parameter)) && spec.trajectory?.some(point => point.altitude === undefined)) ctx.addIssue({ code: 'custom', message: 'Altitude-level parameters require an altitude for every trajectory point.', path: ['trajectory'] });
+});
+export const meteomaticsAvailabilitySchema = z.object({ spec: meteomaticsQuerySchema }).strict();
+export const meteomaticsExecuteSchema = z.object({ spec: meteomaticsQuerySchema, confirmed: z.literal(true) }).strict();
+export const interpretMeteomaticsSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();
 
 export function parseInput<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, value: unknown): T {
   if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > 20_000) throw new HttpsError('invalid-argument', 'La solicitud supera los 20 KB.');

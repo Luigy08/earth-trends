@@ -4,19 +4,20 @@ import { logger } from 'firebase-functions';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, InterpretQueryResponse, ListSessionsResponse, SearchLocationsResponse } from '../../shared/types';
+import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
+import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { CONFIG } from './config.constant';
 import { FirestoreCache } from './cache';
 import { AnalysisRepository } from './repository';
 import { SessionRepository } from './sessions';
 import { AnalysisService } from './analysis';
-import { NasaPowerProvider } from './providers/nasa';
 import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics';
+import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
 import { LocationSearch } from './providers/locations';
-import { explainResults, parseIntent, resolveInterpretation } from './ai';
+import { explainResults, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
-import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, interpretQuerySchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
+import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, interpretMeteomaticsSchema, interpretQuerySchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
 setGlobalOptions({ region: CONFIG.region, maxInstances: CONFIG.maxInstances });
@@ -25,8 +26,10 @@ const cache = new FirestoreCache(db);
 const repository = new AnalysisRepository(db);
 const sessions = new SessionRepository(db);
 const locations = new LocationSearch(cache);
-const analysisService = new AnalysisService(new NasaPowerProvider(cache), cache, new MeteomaticsProvider(cache));
+const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache);
+const meteomaticsQueries = new MeteomaticsQueryProvider(cache);
 const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 120, memory: '512MiB' as const };
+const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
 
 function requireOwner(request: CallableRequest<unknown>): string {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to continue.');
@@ -101,6 +104,46 @@ export const searchLocations = onCall(callableOptions, async (request): Promise<
   await consumeQuota(db, ownerId, 'searchLocations');
   try { return { locations: await locations.search(input.query, input.limit) }; }
   catch { throw new HttpsError('unavailable', 'Location search is unavailable. Please try again later.'); }
+});
+
+export const getMeteomaticsCatalog = onCall(callableOptions, async (request): Promise<MeteomaticsCatalogResponse> => {
+  requireOwner(request);
+  return { version: METEOMATICS_CATALOG_VERSION, sourceUrl: METEOMATICS_CATALOG_SOURCE, parameters: [...METEOMATICS_PARAMETER_CATALOG] };
+});
+
+export const interpretMeteomatics = onCall(callableOptions, async (request): Promise<InterpretMeteomaticsResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(interpretMeteomaticsSchema, request.data);
+  await consumeQuota(db, ownerId, 'interpretQuery');
+  try { return await interpretMeteomaticsQuery(input.query, locations); }
+  catch (error) {
+    logger.warn('Meteomatics request interpretation failed', { kind: error instanceof Error ? error.name : 'unknown' });
+    throw new HttpsError('unavailable', 'The Meteomatics assistant is unavailable. Try again or prepare the request manually.');
+  }
+});
+
+export const checkMeteomaticsAvailability = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsAvailabilityResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(meteomaticsAvailabilitySchema, request.data);
+  await consumeQuota(db, ownerId, 'meteomaticsAvailability');
+  try { return await meteomaticsQueries.checkAvailability(input.spec); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'Meteomatics is unavailable. Check credentials and account access.';
+    logger.warn('Meteomatics availability check failed', { message });
+    throw new HttpsError('unavailable', message.slice(0, 500));
+  }
+});
+
+export const executeMeteomaticsQuery = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsExecuteResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(meteomaticsExecuteSchema, request.data);
+  await consumeQuota(db, ownerId, 'meteomaticsExecute');
+  try { return await meteomaticsQueries.execute(input.spec); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : 'Meteomatics query failed.';
+    logger.warn('Meteomatics query failed', { message });
+    throw new HttpsError('unavailable', message.slice(0, 500));
+  }
 });
 
 export const createAnalysis = onCall(callableOptions, async request => {

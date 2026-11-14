@@ -21,19 +21,14 @@ Official brief: <https://www.spaceappschallenge.org/2026/challenges/earth-system
 - Natural-language question and a precise editable form are equivalent paths into one validated analysis request. Gemini interprets intent and asks clarifying questions; show the interpretation for user confirmation before analysis.
 - Supported POC metrics: temperature and precipitation. Search global cities and allow comparisons between two locations over common complete years or between two time periods. Default range starts in 2000 and ends at the latest complete year.
 - Results include location context, monthly and annual series, trend and uncertainty, coverage, comparison, provenance, a cautious report, CSV, and print-to-PDF. Clearly say when the data cannot support an inference.
-- Historical analysis uses NASA POWER. Giovanni remains a tool to explore and cross-check NASA products, variables, spatial coverage, and behavior; do not describe Giovanni as the production provider for app results unless code actually calls it.
-- Meteomatics current weather is an optional separate context panel, not historical climate evidence. Missing credentials or API access must be reported honestly while preserving the NASA historical analysis.
+- Historical trend analysis uses Meteomatics daily aggregates for `t_mean_2m_24h:C` and `precip_24h:mm`, converted to complete monthly values. Historical access and range depend on account entitlement. Never claim a source is available without a successful provider response.
+- Meteomatics current weather is a separate context panel and is never mixed into historical trend calculations. Missing credentials or API access must be reported honestly.
 
-## NASA data and variable selection
+## NASA data resource selection
 
-### NASA POWER
+Use only the datasets listed in the challenge resources or explicitly approved by the user. Verify dataset metadata before adding any NASA Earth-data source: variable meaning, units, sign convention, temporal aggregation, spatial grid/coverage, valid range, missing-value encoding, and relevance to the question.
 
-- The implementation queries the monthly point API as JSON by selected coordinates. Meteorological variables are derived from NASA GMAO MERRA-2, with coverage from 1981 through the previous year according to NASA documentation.
-- Current analysis parameters: `T2M` (2 m air temperature, degrees C) and `PRECTOTCORR` (corrected precipitation, mm/day). Verify live response parameter names and units; fail clearly if they differ.
-- A city selection represents a gridded point/cell, **not a city-wide mean or station observation**. Show coordinates and the dataset/provenance.
-- NASA POWER monthly API docs: <https://power.larc.nasa.gov/docs/services/api/temporal/monthly/>.
-
-### Giovanni and GES DISC
+## Giovanni and GES DISC
 
 - Use Giovanni to inspect available NASA datasets, select variables and areas/time ranges, make exploratory plots/maps/time series, inspect missing coverage, and cross-check analysis before turning a finding into a product claim. Prefer primary NASA dataset documentation and API metadata for exact parameter semantics and units.
 - NASA GES DISC dataset page shared in this project: `M2TMNXINT_5.12.4` (MERRA-2 monthly time-integrated diagnostics): <https://disc.gsfc.nasa.gov/datasets/M2TMNXINT_5.12.4/summary>.
@@ -45,7 +40,7 @@ Official brief: <https://www.spaceappschallenge.org/2026/challenges/earth-system
 
 - Keep numerical analysis deterministic and server-side. Gemini may interpret the user's question and explain precomputed qualitative results, but must not invent, alter, or supply statistics. Include the app-computed numeric report and provenance independently of generated prose; use a deterministic template if Gemini is unavailable or returns unsafe numerical claims.
 - Normalize data and document provider, product, resolution, units, retrieval time, location, and period. Preserve null/missing values; never silently impute or splice providers.
-- Annual temperature is the calendar-day-weighted mean of valid months; annual precipitation is the sum of monthly totals. NASA POWER precipitation is a rate in mm/day: multiply by each month's actual number of days, including leap February, before summing. For the UI, monthly precipitation totals are mm/month and annual totals are mm/year.
+- Annual temperature is the calendar-day-weighted mean of valid months; annual precipitation is the sum of monthly totals. Meteomatics daily precipitation aggregates are converted to monthly totals using actual month lengths, including leap February. For the UI, monthly precipitation totals are mm/month and annual totals are mm/year.
 - A valid annual value needs 12 distinct valid months. Do not infer a trend unless at least 10 complete years and 80% of the requested interval are available; label this as the POC's operational threshold. If insufficient, retain descriptive data and return an explicit insufficient-data result.
 - Use OLS over actual calendar years with Newey–West autocorrelation-robust uncertainty. Report slope per decade, 95% interval, and p-value when inference is supported; use alpha 0.05. Distinguish a non-significant trend from proof of no change. Never imply causality or attribution from correlation/trend alone.
 - Calculate anomalies only when all 30 complete baseline years (1991–2020) are available. Otherwise omit anomalies and state why.
@@ -56,7 +51,7 @@ Official brief: <https://www.spaceappschallenge.org/2026/challenges/earth-system
 ## Architecture and project conventions
 
 - Frontend: React, Vite, TypeScript, MUI, Recharts, Leaflet. Backend: Firebase Functions v2 in `us-central1`, Firestore, anonymous Auth, App Check, Genkit/Vertex AI. Project ID: `earth-trend-detective`; verify current deployed state before operational changes.
-- Keep provider adapters independent. NASA POWER historical data are primary. Geocoding resolves explicit city/country matches; display the selected coordinates. Use Firebase Secret Manager for Meteomatics credentials. Never expose provider credentials in Vite variables, source control, browser logs, or chat.
+- Keep provider adapters independent. Meteomatics supplies historical aggregates and current weather through separate requests. Geocoding resolves explicit city/country matches; display the selected coordinates. Use Firebase Secret Manager for Meteomatics credentials. Never expose provider credentials in Vite variables, source control, browser logs, or chat.
 - Respect Firestore owner isolation, App Check, per-user/global quotas, server-side validation, caching, and bounded Function instances. Do not weaken these protections to make a demo pass.
 - Follow repository `AGENTS.md`: SOLID, reuse shared components, inspect existing `.types.ts` before adding types, keep types/constants/styles/resolvers in their corresponding files where appropriate, prefer MUI, preserve existing function/variable names, and keep files below 1,000 lines when practical. Do not add or run tests unless the user asks; use other relevant validation such as type-check/build when needed.
 - User-facing site language is English by the user's request. Keep user-facing product copy, model prompts/results, error messages, metadata, CSV headings, accessible labels, and date/number formatting consistent.
@@ -65,6 +60,6 @@ Official brief: <https://www.spaceappschallenge.org/2026/challenges/earth-system
 ## When working on a feature
 
 1. Read `AGENTS.md`, this skill, and the relevant contracts/types plus implementation before editing.
-2. Map the requested work to the official challenge objective and the POC requirements above. If it broadens the data scope, verify the NASA metadata and scientific meaning first.
+2. Map the requested work to the official challenge objective and the POC requirements above. If it broadens the data scope, verify the allowed resource and its authoritative metadata and scientific meaning first.
 3. Make the smallest complete change across UI, callable contracts, backend/provider, provenance, fallback, and documentation as applicable. Preserve honest partial outcomes.
 4. Report concrete implementation/deployment status and any unmet dependency, such as Meteomatics account entitlement or a required map-provider key. Do not present plans as completed work.

@@ -1,10 +1,13 @@
 import { genkit, z } from 'genkit';
 import { vertexAI } from '@genkit-ai/google-genai';
-import type { AnalysisResult, AnalysisSpec, InterpretQueryResponse } from '../../shared/types';
+import type { AnalysisResult, AnalysisSpec, InterpretQueryResponse, InterpretMeteomaticsResponse, MeteomaticsQuerySpec } from '../../shared/types';
 import type { ParsedIntent } from './backend.types';
 import { CONFIG } from './config.constant';
 import { analysisSpecSchema } from './validation';
 import type { LocationSearch } from './providers/locations';
+import { METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
+import { meteomaticsQuerySchema } from './validation';
+import { METEOMATICS_ASSISTANT_PROMPT } from './meteomatics-assistant.constant';
 
 const intentYearSchema = z.number().int().min(1981).max(new Date().getUTCFullYear() - 1);
 const intentSchema = z.object({
@@ -138,4 +141,68 @@ export async function resolveInterpretation(intent: ParsedIntent, locations: Loc
     return { ...base, status: 'needs_clarification' };
   }
   return { ...base, status: 'ready', spec };
+}
+
+const meteomaticsIntentSchema = z.object({
+  locationQuery: z.string().nullable(),
+  suggestions: z.array(z.string()),
+  options: z.object({ calibrated: z.boolean().nullable(), mask: z.enum(['land', 'sea']).nullable(), ens_select: z.string().nullable() }).nullable(),
+  ready: z.boolean(), mode: z.enum(['point', 'grid', 'station', 'route', 'polygon', 'trajectory']).nullable(),
+  source: z.string().nullable(), parameters: z.array(z.string()), validDates: z.string().nullable(),
+  format: z.enum(['json', 'csv', 'xml']).nullable(), point: z.object({ latitude: z.number(), longitude: z.number() }).nullable(),
+  grid: z.object({ north: z.number(), west: z.number(), south: z.number(), east: z.number(), resolution: z.string() }).nullable(),
+  stationIds: z.array(z.string()).nullable(), route: z.array(z.object({ latitude: z.number(), longitude: z.number() })).nullable(),
+  polygon: z.object({ coordinates: z.array(z.object({ latitude: z.number(), longitude: z.number() })), aggregate: z.enum(['min', 'max', 'mean', 'median', 'mode']) }).nullable(),
+  trajectory: z.array(z.object({ date: z.string(), latitude: z.number(), longitude: z.number(), altitude: z.number().nullable() })).nullable(),
+  summary: z.string(), clarificationQuestions: z.array(z.string()),
+});
+
+function catalogCandidates(query: string): string[] {
+  const terms = query.toLowerCase().split(/[^a-z0-9_:+.-]+/).filter(term => term.length > 2);
+  const ranked = METEOMATICS_PARAMETER_CATALOG.map(item => ({
+    ...item,
+    score: terms.reduce((score, term) => score + Number(item.parameter.toLowerCase().includes(term)) * 4 + Number(item.description.toLowerCase().includes(term)), 0),
+  })).sort((a, b) => b.score - a.score).slice(0, 60);
+  return ranked.map(({ parameter, description }) => `${parameter} — ${description}`);
+}
+
+export async function interpretMeteomaticsQuery(query: string, locations: LocationSearch): Promise<InterpretMeteomaticsResponse> {
+  const response = await getAi().generate({
+    model: vertexAI.model(CONFIG.geminiModel), config: { temperature: 0, maxOutputTokens: 3072 },
+    output: { schema: meteomaticsIntentSchema },
+    system: `${METEOMATICS_ASSISTANT_PROMPT}\nToday: ${new Date().toISOString().slice(0, 10)}\nCatalog (templates may contain placeholder levels/intervals):\n${METEOMATICS_PARAMETER_CATALOG.map(item => `${item.parameter}: ${item.description}`).join('\n')}`,
+    prompt: JSON.stringify({ query }),
+  });
+  const value = response.output;
+  if (!value) throw new Error('The model did not return a valid Meteomatics request.');
+  const clarificationQuestions = value.clarificationQuestions.slice(0, 6).map(question => question.slice(0, 300));
+  let locationLabel: string | undefined;
+  if (value.mode === 'point' && value.locationQuery) {
+    const matches = await locations.search(value.locationQuery, 3);
+    value.point = null;
+    if (matches.length === 1) {
+      const match = matches[0]!;
+      value.point = { latitude: match.latitude, longitude: match.longitude };
+      locationLabel = `${match.name}${match.country ? `, ${match.country}` : ''}`;
+    } else {
+      value.ready = false;
+      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${value.locationQuery}. Could you add the region or a nearby city?`);
+    }
+  }
+  const metadata = { suggestions: value.suggestions.slice(0, 3), ...(locationLabel ? { locationLabel } : {}) };
+  if (value.ready && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
+    const specCandidate = {
+      options: Object.fromEntries(Object.entries(value.options ?? {}).filter(([, entry]) => entry !== null)),
+      mode: value.mode, source: value.source, parameters: value.parameters, validDates: value.validDates.replace(/(Z|[+-]\d{2}:?\d{2})\/(?=\d{4}-\d{2}-\d{2}T)/g, '$1--'), format: value.format,
+      ...(value.point ? { point: value.point } : {}), ...(value.grid ? { grid: value.grid } : {}),
+      ...(value.stationIds ? { stationIds: value.stationIds } : {}), ...(value.route ? { route: value.route } : {}),
+      ...(value.polygon ? { polygon: value.polygon } : {}),
+      ...(value.trajectory ? { trajectory: value.trajectory.map(point => ({ ...point, ...(point.altitude === null ? {} : { altitude: point.altitude }) })) } : {}),
+    };
+    const parsed = meteomaticsQuerySchema.safeParse(specCandidate);
+    if (parsed.success) return { status: 'ready', spec: parsed.data as MeteomaticsQuerySpec, summary: value.summary, clarificationQuestions: [], ...metadata };
+    clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
+  }
+  if (!clarificationQuestions.length) clarificationQuestions.push('Provide a parameter, source, UTC date or date range, request mode, and the location details required for that mode.');
+  return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...metadata };
 }

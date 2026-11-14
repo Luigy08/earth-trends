@@ -68,6 +68,33 @@ export interface AttachSessionAnalysisRequest extends SessionRequest { analysisI
 export interface AttachSessionAnalysisResponse { attached: true; message: ConversationMessage }
 export interface DeleteSessionResponse { deleted: true }
 
+export type MeteomaticsQueryMode = 'point' | 'grid' | 'station' | 'route' | 'polygon' | 'trajectory';
+export type MeteomaticsSource = string;
+export interface MeteomaticsCoordinate { latitude: number; longitude: number }
+export interface MeteomaticsTrajectoryPoint extends MeteomaticsCoordinate { date: string; altitude?: number }
+export interface MeteomaticsQuerySpec {
+  mode: MeteomaticsQueryMode;
+  source: MeteomaticsSource;
+  parameters: string[];
+  validDates: string;
+  format: 'json' | 'csv' | 'xml';
+  options?: { calibrated?: boolean; mask?: 'land' | 'sea'; ens_select?: string };
+  point?: MeteomaticsCoordinate;
+  grid?: { north: number; west: number; south: number; east: number; resolution: string };
+  stationIds?: string[];
+  route?: MeteomaticsCoordinate[];
+  polygon?: { coordinates: MeteomaticsCoordinate[]; aggregate: 'min' | 'max' | 'mean' | 'median' | 'mode' };
+  trajectory?: MeteomaticsTrajectoryPoint[];
+}
+export interface MeteomaticsCatalogEntry { parameter: string; description: string; domain: string }
+export interface MeteomaticsCatalogResponse { version: string; sourceUrl: string; parameters: MeteomaticsCatalogEntry[] }
+export interface InterpretMeteomaticsRequest { query: string }
+export interface InterpretMeteomaticsResponse { status: 'ready' | 'needs_clarification'; spec?: MeteomaticsQuerySpec; summary: string; clarificationQuestions: string[]; suggestions?: string[]; locationLabel?: string }
+export interface MeteomaticsAvailabilityRequest { spec: MeteomaticsQuerySpec }
+export interface MeteomaticsAvailabilityResponse { available: boolean; ranges: Array<{ parameter: string; minDate: string; maxDate: string; requestedWithinRange: boolean }>; message?: string }
+export interface MeteomaticsExecuteRequest { spec: MeteomaticsQuerySpec; confirmed: true }
+export interface MeteomaticsExecuteResponse { provider: 'Meteomatics'; source: string; requestedAt: string; request: Omit<MeteomaticsQuerySpec, 'trajectory'> & { trajectory?: MeteomaticsTrajectoryPoint[] }; responseFormat: string; result: unknown; provenance: DataProvenance }
+
 /** Public result values: temperature °C; precipitation mm/month. Internal providers use mm/day. */
 export interface MonthlyObservation { year: number; month: number; value: number | null }
 export interface AnnualObservation { year: number; value: number; anomaly: number | null }
@@ -92,12 +119,12 @@ export interface DataQuality {
   warnings: string[];
 }
 export interface DataProvenance {
-  provider: 'NASA POWER' | 'Meteomatics' | 'Open-Meteo';
+  provider: 'Meteomatics' | 'Open-Meteo';
   dataset: string;
   parameters: string[];
   sourceUrl: string;
   retrievedAt: string;
-  temporalResolution: 'monthly' | 'current';
+  temporalResolution: 'monthly' | 'current' | 'request-defined';
   isHistorical: boolean;
   attribution: string;
 }
@@ -119,7 +146,7 @@ export interface LocationAnalysis {
   trend: TrendStatistics | null;
   quality: DataQuality;
   baseline: { startYear: 1991; endYear: 2020; mean: number | null };
-  source: 'NASA POWER' | 'Meteomatics';
+  source: 'Meteomatics';
   provenance: DataProvenance | null;
   currentWeather: CurrentWeather;
 }

@@ -19,4 +19,4 @@ for (const name of names) {
   if (result.status !== 0) throw new Error(`No se pudo guardar ${name} en Secret Manager. Revisa los permisos de la cuenta de despliegue.`);
   console.log(`${name}: guardado en Secret Manager.`);
 }
-console.log('Activa METEOMATICS_USE_SECRET_MANAGER=true en functions/.env.earth-trend-detective y vuelve a desplegar las funciones.');
+console.log('Meteomatics endpoints use Secret Manager in production by default; redeploy Functions to bind the latest secret versions.');

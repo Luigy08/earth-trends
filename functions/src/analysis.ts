@@ -1,6 +1,6 @@
 import type { AnalysisPeriod, AnalysisResult, AnalysisSpec, AnnualObservation, Location, LocationAnalysis } from '../../shared/types';
 import type { CacheStore, ClimateProvider, ClimateSeries } from './backend.types';
-import { BASELINE, CONFIG, METHODOLOGY_VERSION, MIN_COVERAGE, MIN_YEARS } from './config.constant';
+import { BASELINE, METHODOLOGY_VERSION, MIN_COVERAGE, MIN_YEARS } from './config.constant';
 import { annualize, calculateTrend, daysInMonth } from './statistics';
 import { getCurrentWeather, WEATHER_NOTICE } from './providers/current-weather';
 
@@ -34,7 +34,7 @@ export function summarizeSeries(location: Location, spec: AnalysisSpec, period: 
     quality: { requestedYears: requested.length, completeYears: annual.length, coverage,
       excludedYears: requested.filter(y => !present.has(y)), baselineYears: baselineAnnual.length, warnings },
     baseline: { ...BASELINE, mean: baselineMean },
-    source: series?.provenance.provider === 'Meteomatics' ? 'Meteomatics' : 'NASA POWER', provenance: series?.provenance ?? null,
+    source: 'Meteomatics', provenance: series?.provenance ?? null,
     currentWeather: { status: 'source_unavailable', observedAt: null, temperatureC: null, precipitationMm: null, provenance: null, notice: WEATHER_NOTICE },
   };
 }
@@ -74,18 +74,13 @@ export function assembleResult(spec: AnalysisSpec, locations: LocationAnalysis[]
 }
 
 export class AnalysisService {
-  constructor(private readonly provider: ClimateProvider, private readonly cache: CacheStore, private readonly fallback?: ClimateProvider) {}
+  constructor(private readonly provider: ClimateProvider, private readonly cache: CacheStore) {}
   async run(spec: AnalysisSpec): Promise<AnalysisResult> {
     const startYear = Math.min(BASELINE.startYear, spec.startYear, spec.secondPeriod?.startYear ?? spec.startYear);
     const endYear = Math.max(BASELINE.endYear, spec.endYear, spec.secondPeriod?.endYear ?? spec.endYear);
     const series = await Promise.all(spec.locations.map(async location => {
       try { return await this.provider.getMonthly(location, spec.metric, startYear, endYear); }
-      catch {
-        if (CONFIG.meteomaticsFallback && this.fallback) {
-          try { return await this.fallback.getMonthly(location, spec.metric, startYear, endYear); } catch { return null; }
-        }
-        return null;
-      }
+      catch { return null; }
     }));
     let commonYears: number[] = [];
     if (spec.comparisonMode === 'locations') {

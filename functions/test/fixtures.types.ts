@@ -15,7 +15,7 @@ export function makeMonthly(startYear: number, endYear: number, value = 20): Mon
 }
 
 export function makeSeries(monthly: MonthlyObservation[]): ClimateSeries {
-  return { monthly, provenance: { provider: 'NASA POWER', dataset: 'fixture', parameters: ['T2M'],
-    sourceUrl: 'https://power.larc.nasa.gov/', retrievedAt: '2026-01-01T00:00:00Z', temporalResolution: 'monthly',
-    isHistorical: true, attribution: 'NASA POWER' } };
+  return { monthly, provenance: { provider: 'Meteomatics', dataset: 'fixture', parameters: ['t_mean_2m_24h:C'],
+    sourceUrl: 'https://api.meteomatics.com/', retrievedAt: '2026-01-01T00:00:00Z', temporalResolution: 'monthly',
+    isHistorical: true, attribution: 'Meteomatics' } };
 }

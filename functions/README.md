@@ -11,6 +11,10 @@ All callables require Firebase Authentication. `ENFORCE_APP_CHECK` defaults **tr
 | Callable | Input | Output |
 | --- | --- | --- |
 | `interpretQuery` | `{ query }` | `{ status: 'ready' \| 'needs_clarification', spec?, summary, warnings, clarificationQuestions }` |
+| `getMeteomaticsCatalog` | `{}` | Versioned complete parameter catalog snapshot |
+| `interpretMeteomatics` | `{ query }` | Meteomatics request draft or clarification questions |
+| `checkMeteomaticsAvailability` | `{ spec }` | Per-parameter source time ranges and availability |
+| `executeMeteomaticsQuery` | `{ spec, confirmed: true }` | Raw result, request details and provenance |
 | `searchLocations` | `{ query, limit?: 1..10 }` | `{ locations }` |
 | `createAnalysis` | `{ spec, requestId }` | `{ analysisId, status }` |
 | `getAnalysis` | `{ analysisId }` | `{ analysis }` |
@@ -31,7 +35,7 @@ Per-user transactional quotas default to **10 new analyses per UTC hour**; inter
 
 ## Data and inference
 
-- NASA POWER monthly point API, `T2M` in `C`, `PRECTOTCORR` in `mm/day`; unexpected units or invalid structures yield source-unavailable rather than silently changing science. Fill values, missing values, negative precipitation and the synthetic annual month 13 are excluded.
+- Meteomatics historical daily aggregates: `t_mean_2m_24h:C` and `precip_24h:mm`, converted into complete monthly values. Historical access, source coverage and entitlement depend on the configured account. Missing credentials or provider failure return an explicit source-unavailable result.
 - Temperature annual means are weighted by calendar days. Precipitation rates multiply actual month lengths, including leap February, then sum to annual mm. **Public monthly precipitation is mm/month**, public annual precipitation is mm/year. Internal provider months remain mm/day.
 - An annual observation requires 12 distinct valid months. Trend inference needs at least 10 complete years and at least 80% of requested calendar years; no imputation or interpolation. Excluded years are listed.
 - OLS uses actual calendar years. A Bartlett Newey–West HAC covariance accounts for heteroskedasticity and residual autocorrelation. Bandwidth is `floor(4*(n/100)^(2/9))`, capped at `n-1`; lag distances use actual years, including gaps. The covariance uses the `n/(n-2)` correction. Two-sided p-values and 95% intervals use `jstat` Student-t with `n-2` degrees of freedom, a finite-sample approximation to HAC inference. Zero-variance series have p=1 for zero slope, p=0 for nonzero slope.
@@ -41,13 +45,15 @@ Per-user transactional quotas default to **10 new analyses per UTC hour**; inter
 
 ## Optional Meteomatics
 
-Current weather uses **Meteomatics only**, requesting `t_2m:C` and `precip_1h:mm`. Missing credentials, disabled weather or provider failure produce an explicit status with null values; there is no weather fallback to Open-Meteo. Weather includes provenance and an English notice distinguishing weather from climate.
+Historical trends and current weather use **Meteomatics** through separate provider requests. Current weather requests `t_2m:C` and `precip_1h:mm`; those values are not used in trend analysis. Missing credentials, disabled current weather or provider failure produce an explicit unavailable status. Each historical series uses a single provider and is never spliced with another source.
 
-For local development, the user's ignored `functions/.env.local` can contain `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD`, with `METEOMATICS_USE_SECRET_MANAGER=false`. The Firebase emulator loads `.env.local`; plain Node scripts do not automatically load dotenv. Never upload a local credential file as a production environment file.
+The chat has a separate Meteomatics REST workflow. Its catalog is a versioned snapshot of the official alphabetical parameter list and must be refreshed when Meteomatics updates that list. It covers standard point/time-series, grid, station, route, polygon and trajectory queries; specialized WMS/WFS/alerts/imagery endpoints are outside this integration. The user sees parameter selection and a request preview, source-specific availability is checked with `get_time_range`, and explicit confirmation is required before execution. Larger standard calls use POST; trajectories use Meteomatics' trajectory POST endpoint. Results remain raw provider values with request, time, source and attribution; they are not transformed into trend analysis. Account credentials, source entitlements, parameter support and temporal coverage determine whether a given call succeeds. Station data require `mix-obs` and may need an entitled account.
 
-For production, the parent should create Secret Manager secrets using Firebase CLI `functions:secrets:set METEOMATICS_USERNAME` and `functions:secrets:set METEOMATICS_PASSWORD`, then set `METEOMATICS_USE_SECRET_MANAGER=true` in `.env.earth-trend-detective` and deploy the worker. **Only `processAnalysis` binds secrets.** With the flag false, the binding array is empty and deployment does not require the secrets to exist. Updating secret versions requires redeploying the bound worker. Emulator Secret Manager overrides belong in ignored `.secret.local`.
+For local development, the ignored `functions/.env.local` can contain `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD`; the emulator defaults to `METEOMATICS_USE_SECRET_MANAGER=false`. Never upload a local credential file as a production environment file.
 
-`METEOMATICS_FALLBACK=false` by default. Optional historical fallback fetches complete daily aggregates one year per request, converts complete months to the same internal representation and reports Meteomatics provenance; it never splices providers into one location series. Historical access requires the appropriate subscription and can exceed the worker's time budget on a slow provider. Leave this off for the NASA-only historical workflow.
+For production, create Secret Manager secrets using Firebase CLI `functions:secrets:set METEOMATICS_USERNAME` and `functions:secrets:set METEOMATICS_PASSWORD`. Secret Manager is the production default. `processAnalysis`, `checkMeteomaticsAvailability` and `executeMeteomaticsQuery` bind these secrets. Updating secret versions requires redeploying the bound functions. Emulator Secret Manager overrides belong in ignored `.secret.local`.
+
+Historical trend retrieval fetches daily aggregates one year per request and converts only complete months into the analysis series. An eligible historical-data subscription is required; coverage varies by account and source, and slow requests can approach the worker time limit.
 
 ## Caching, configuration and checks
 
@@ -57,4 +63,4 @@ Copy configuration names from `.env.example`, with production values owned by th
 
 Run `npm run build`, `npm run typecheck`, and `npm test`. Tests use the built-in Node test runner, not Vitest, and mocked external APIs. They do not contact production or deploy infrastructure. Live Vertex/provider checks and deployed Auth/App Check/Firestore IAM verification belong to the parent's environment.
 
-Provider references: [NASA monthly API](https://power.larc.nasa.gov/docs/services/api/temporal/monthly/), [Genkit Vertex integration](https://genkit.dev/docs/js/integrations/vertex-ai/), [Firebase Firestore event semantics](https://firebase.google.com/docs/functions/firestore-events), [Meteomatics API](https://www.meteomatics.com/en/api/getting-started/), [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).
+Provider references: [Genkit Vertex integration](https://genkit.dev/docs/js/integrations/vertex-ai/), [Firebase Firestore event semantics](https://firebase.google.com/docs/functions/firestore-events), [Meteomatics API](https://www.meteomatics.com/en/api/getting-started/), [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).

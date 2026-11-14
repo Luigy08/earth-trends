@@ -20,7 +20,9 @@ export const meteomaticsResponseSchema = z.object({ data: z.array(z.object({ par
   coordinates: z.array(z.object({ dates: z.array(z.object({ date: z.string(), value: z.number().nullable() })) })),
 })) });
 
-/** Optional whole-series fallback. Never combines providers within a historical series. */
+const RESERVED_VALUES = new Set([-999, -888, -777, -666]);
+
+/** Historical trend provider. Each analysis uses a single Meteomatics series without source splicing. */
 export class MeteomaticsProvider implements ClimateProvider {
   constructor(private readonly cache: CacheStore) {}
   async getMonthly(location: Location, metric: ClimateMetric, startYear: number, endYear: number): Promise<ClimateSeries> {
@@ -42,7 +44,7 @@ export class MeteomaticsProvider implements ClimateProvider {
       const months = new Map<number, Map<number, number>>();
       for (const item of dates) {
         const date = new Date(Date.parse(item.date) - 86400000);
-        if (date.getUTCFullYear() !== year || item.value === null || item.value <= -666 || !Number.isFinite(item.value)
+        if (!Number.isFinite(date.getTime()) || date.getUTCFullYear() !== year || item.value === null || RESERVED_VALUES.has(item.value) || !Number.isFinite(item.value)
           || (metric === 'precipitation' && item.value < 0)) continue;
         const month = date.getUTCMonth() + 1;
         const days = months.get(month) ?? new Map<number, number>();
@@ -55,9 +57,9 @@ export class MeteomaticsProvider implements ClimateProvider {
         monthly.push({ year, month, value: days?.size === count ? [...days.values()].reduce((a, b) => a + b, 0) / count : null });
       }
     }
-    const result: ClimateSeries = { monthly, provenance: { provider: 'Meteomatics', dataset: 'Historical daily aggregates to complete months',
+    const result: ClimateSeries = { monthly, provenance: { provider: 'Meteomatics', dataset: 'Meteomatics historical daily aggregates; complete monthly values derived in the app',
       parameters: [parameter], sourceUrl: 'https://api.meteomatics.com/', retrievedAt: new Date().toISOString(), temporalResolution: 'monthly',
-      isHistorical: true, attribution: 'Meteomatics Weather API; historical access requires an eligible subscription.',
+      isHistorical: true, attribution: 'Meteomatics Weather API; historical coverage requires an eligible subscription and depends on the selected account.',
     } };
     await this.cache.set(key, result, CONFIG.cacheTtlSeconds);
     return result;

@@ -30,6 +30,8 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
 
   useEffect(() => {
     let active = true;
+    setBusy(true);
+    setError('');
     void (async () => {
       try {
         const items = await refresh();
@@ -40,7 +42,16 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
           if (!active) return;
           setSessions([session]); setCurrent(session); setMessages([]); setProposal(null); onRestoreAnalysis(null);
         }
-      } catch (cause) { if (active) setError(errorMessage(cause)); }
+      } catch (cause) {
+        if (active) {
+          const code = cause !== null && typeof cause === 'object' && 'code' in cause ? String(cause.code) : '';
+          const message = cause instanceof Error ? cause.message : '';
+          const failure = `${code} ${message}`;
+          setError(/not-found|NOT_FOUND|internal|unavailable|network|fetch/i.test(failure)
+            ? 'Could not initialize a saved session. The session Cloud Functions are missing or unavailable in this Firebase project/region. Deploy the current Functions code and reload.'
+            : errorMessage(cause));
+        }
+      } finally { if (active) setBusy(false); }
     })();
     return () => { active = false; };
   }, [open, refresh, onRestoreAnalysis]);
@@ -55,7 +66,10 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   }, [onRestoreAnalysis]);
 
   const send = useCallback(async (message: string) => {
-    if (!current) return;
+    if (!current) {
+      setError('A session is required to send a question. Check that the session Cloud Functions are deployed, then reload.');
+      return;
+    }
     setBusy(true); setError('');
     try {
       const result = await chatSession({ sessionId: current.id, message });

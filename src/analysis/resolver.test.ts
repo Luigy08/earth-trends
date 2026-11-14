@@ -11,7 +11,7 @@ const series: LocationAnalysis = {
   annual: [{ year: 2020, value: 22, anomaly: 1 }, { year: 2022, value: 24, anomaly: 3 }],
   trend: { method: 'OLS-Newey-West', slopePerYear: 1, slopePerDecade: 10, intercept: -1998, confidenceInterval95PerDecade: [9, 11], pValue: .01, significant: true, sampleSize: 2, lag: 0, rSquared: 1 },
   quality: { requestedYears: 3, completeYears: 2, coverage: 2 / 3, excludedYears: [2021], baselineYears: 30, warnings: [] },
-  baseline: { startYear: 1991, endYear: 2020, mean: 21 }, source: 'NASA POWER', provenance: null,
+  baseline: { startYear: 1991, endYear: 2020, mean: 21 }, source: 'Meteomatics', provenance: null,
   currentWeather: { status: 'disabled', observedAt: null, temperatureC: null, precipitationMm: null, provenance: null, notice: '' },
 };
 

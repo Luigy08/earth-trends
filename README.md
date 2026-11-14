@@ -1,6 +1,6 @@
 # Earth Trend Detective
 
-NASA Space Apps POC for natural-language climate questions, NASA POWER temperature and precipitation analysis, comparisons across locations or time periods, and current conditions from Meteomatics.
+NASA Space Apps POC for natural-language climate questions, historical temperature and precipitation trend analysis using Meteomatics, comparisons across locations or time periods, and current conditions.
 
 ## Development
 
@@ -16,7 +16,7 @@ The project uses the Blaze plan. A reference USD 10 budget alert was configured;
 
 ## Meteomatics
 
-Configure `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD` in Firebase Secret Manager and enable them as described in `functions/.env.example`. Do not commit these secrets. Without credentials, the app reports current conditions as unavailable and retains the NASA historical analysis.
+Configure `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD` in Firebase Secret Manager and enable them as described in `functions/.env.example`. Do not commit these secrets. Without credentials or suitable historical-data access, the app reports the analysis source as unavailable; it does not substitute another provider.
 
 To upload credentials from the ignored local file, run `node scripts/configure-meteomatics.mjs deployment-account@example.com`. The script does not print the secret values. Then set `METEOMATICS_USE_SECRET_MANAGER=true` in the Functions environment and redeploy.
 
@@ -26,10 +26,10 @@ Run `npm run build`, `npm test`, `npm --prefix functions run build`, and `npm --
 
 ## Scientific interpretation
 
-NASA POWER queries a grid cell at the city's coordinates, not a municipal average. Only years with 12 valid months are retained; annual temperature is a mean and annual precipitation is a total. Parameter names and units are checked when responses arrive; monthly precipitation rates in mm/day are converted using the actual number of days in each month.
+Historical analysis uses Meteomatics daily aggregates for `t_mean_2m_24h:C` and `precip_24h:mm`. The adapter converts complete daily records into monthly values; only years with 12 valid months are retained. Annual temperature is a calendar-day-weighted mean and annual precipitation is the sum of monthly totals. Historical coverage depends on the Meteomatics account entitlement and requested source.
 
 The slope and its interval are calculated in code, with Newey–West covariance for autocorrelation. The operational threshold for inference is 10 valid years and 80% coverage. Missing values are not interpolated. Lack of statistical significance does not demonstrate lack of change. Gemini explains calculated metrics and does not make causal claims.
 
 Meteomatics provides recent conditions separately: instantaneous temperature and hourly precipitation are not equivalent to monthly averages or totals. The valid time, provider, and data type are shown.
 
-Sources: [NASA POWER](https://power.larc.nasa.gov/docs/services/api/temporal/monthly/), [Giovanni](https://giovanni.gsfc.nasa.gov/giovanni/), [Meteomatics](https://www.meteomatics.com/en/api/getting-started/), [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api), [CARTO Basemaps](https://carto.com/basemaps/apikey/).
+Sources: [Meteomatics](https://www.meteomatics.com/en/api/getting-started/), [NASA Giovanni](https://giovanni.gsfc.nasa.gov/giovanni/), [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api), [CARTO Basemaps](https://carto.com/basemaps/apikey/).

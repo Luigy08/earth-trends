@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /analyses/{id} {
+      allow get: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow list, write: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

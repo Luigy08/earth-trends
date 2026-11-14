@@ -1,0 +1,149 @@
+/** Public callable contract. All callables require Firebase Authentication. */
+export type ClimateMetric = 'temperature' | 'precipitation';
+export type AnalysisStatus = 'queued' | 'processing' | 'completed' | 'insufficient_data' | 'source_unavailable' | 'failed';
+export type ScientificOutcome = 'sufficient_data' | 'insufficient_data' | 'source_unavailable';
+export type ComparisonMode = 'none' | 'locations' | 'periods';
+export interface AnalysisPeriod { startYear: number; endYear: number }
+
+export interface Location {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  country?: string;
+}
+
+export interface AnalysisSpec {
+  metric: ClimateMetric;
+  locations: Location[];
+  startYear: number;
+  endYear: number;
+  comparisonMode: ComparisonMode;
+  secondPeriod?: AnalysisPeriod;
+}
+
+export interface InterpretQueryRequest { query: string }
+export interface InterpretQueryResponse {
+  status: 'ready' | 'needs_clarification';
+  spec?: AnalysisSpec;
+  summary: string;
+  warnings: string[];
+  clarificationQuestions: string[];
+}
+export interface SearchLocationsRequest { query: string; limit?: number }
+export interface SearchLocationsResponse { locations: Location[] }
+export interface CreateAnalysisRequest { spec: AnalysisSpec; requestId: string }
+export interface CreateAnalysisResponse { analysisId: string; status: AnalysisStatus }
+export interface GetAnalysisRequest { analysisId: string }
+export interface GetAnalysisResponse { analysis: Analysis }
+
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+  spec?: AnalysisSpec;
+  analysisId?: string;
+}
+export interface ConversationSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  analysisId?: string;
+}
+export interface ListSessionsResponse { sessions: ConversationSession[] }
+export interface SessionRequest { sessionId: string }
+export interface CreateSessionResponse { session: ConversationSession }
+export interface GetSessionResponse { session: ConversationSession; messages: ConversationMessage[] }
+export interface RenameSessionRequest extends SessionRequest { title: string }
+export interface ChatSessionRequest extends SessionRequest { message: string }
+export interface ChatSessionResponse {
+  session: ConversationSession;
+  messages: ConversationMessage[];
+  status: 'needs_clarification' | 'ready';
+  spec?: AnalysisSpec;
+}
+export interface AttachSessionAnalysisRequest extends SessionRequest { analysisId: string }
+export interface AttachSessionAnalysisResponse { attached: true; message: ConversationMessage }
+export interface DeleteSessionResponse { deleted: true }
+
+/** Public result values: temperature °C; precipitation mm/month. Internal providers use mm/day. */
+export interface MonthlyObservation { year: number; month: number; value: number | null }
+export interface AnnualObservation { year: number; value: number; anomaly: number | null }
+export interface TrendStatistics {
+  method: 'OLS-Newey-West';
+  slopePerYear: number;
+  slopePerDecade: number;
+  intercept: number;
+  confidenceInterval95PerDecade: [number, number];
+  pValue: number;
+  significant: boolean;
+  sampleSize: number;
+  lag: number;
+  rSquared: number;
+}
+export interface DataQuality {
+  requestedYears: number;
+  completeYears: number;
+  coverage: number;
+  excludedYears: number[];
+  baselineYears: number;
+  warnings: string[];
+}
+export interface DataProvenance {
+  provider: 'NASA POWER' | 'Meteomatics' | 'Open-Meteo';
+  dataset: string;
+  parameters: string[];
+  sourceUrl: string;
+  retrievedAt: string;
+  temporalResolution: 'monthly' | 'current';
+  isHistorical: boolean;
+  attribution: string;
+}
+export interface CurrentWeather {
+  status: 'available' | 'source_unavailable' | 'disabled';
+  observedAt: string | null;
+  temperatureC: number | null;
+  precipitationMm: number | null;
+  provenance: DataProvenance | null;
+  notice: string;
+}
+export interface LocationAnalysis {
+  location: Location;
+  period: AnalysisPeriod;
+  outcome: ScientificOutcome;
+  unit: '°C' | 'mm/year';
+  monthly: MonthlyObservation[];
+  annual: AnnualObservation[];
+  trend: TrendStatistics | null;
+  quality: DataQuality;
+  baseline: { startYear: 1991; endYear: 2020; mean: number | null };
+  source: 'NASA POWER' | 'Meteomatics';
+  provenance: DataProvenance | null;
+  currentWeather: CurrentWeather;
+}
+export interface AnalysisResult {
+  outcome: ScientificOutcome;
+  locations: LocationAnalysis[];
+  commonYears: number[];
+  comparison: {
+    mode: 'locations' | 'periods';
+    slopeDifferencePerDecade: number | null;
+    meanDifference: number | null;
+    description: string;
+  } | null;
+  narrative: string;
+  warnings: string[];
+  methodologyVersion: string;
+}
+export interface Analysis {
+  id: string;
+  ownerId: string;
+  spec: AnalysisSpec;
+  status: AnalysisStatus;
+  createdAt: string;
+  updatedAt: string;
+  result?: AnalysisResult;
+  error?: { code: string; message: string };
+}

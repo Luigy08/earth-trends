@@ -1,0 +1,25 @@
+{
+  "name": "earth-trend-detective-functions",
+  "private": true,
+  "version": "1.0.0",
+  "main": "lib/functions/src/index.js",
+  "engines": { "node": "22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test .test-lib/functions/test/*.test.js",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@genkit-ai/google-genai": "1.44.0",
+    "firebase-admin": "14.5.1",
+    "firebase-functions": "7.4.0",
+    "genkit": "1.44.0",
+    "jstat": "1.9.6",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

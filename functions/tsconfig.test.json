@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": ".test-lib", "declaration": false, "sourceMap": false },
+  "include": ["src/**/*.ts", "test/**/*.ts", "../shared/**/*.ts"],
+  "exclude": ["node_modules", "lib", ".test-lib"]
+}

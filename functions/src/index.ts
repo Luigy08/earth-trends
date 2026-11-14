@@ -15,6 +15,9 @@ import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics'
 import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
 import { LocationSearch } from './providers/locations';
 import { explainResults, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
+import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
+import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
+import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
 import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, interpretMeteomaticsSchema, interpretQuerySchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
@@ -50,7 +53,39 @@ export const interpretQuery = onCall(callableOptions, async (request): Promise<I
 export const createSession = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);
   await consumeQuota(db, ownerId, 'createSession');
-  return sessions.create(ownerId);
+  return { session: await sessions.create(ownerId) };
+});
+export const getMeteomaticsSession = onCall(callableOptions, async request => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(sessionRequestSchema, request.data);
+  await sessions.get(ownerId, input.sessionId);
+  const snapshot = await db.collection('sessions').doc(input.sessionId).collection('meteoState').orderBy('index').get();
+  if (snapshot.empty) return { state: null };
+  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState;
+  if (Array.isArray(state.results)) state.results = state.results.map(result => ({ ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }));
+  return { state };
+});
+export const saveMeteomaticsSession = onCall(callableOptions, async request => {
+  const ownerId = requireOwner(request);
+  const sessionId = request.data?.sessionId;
+  const state = request.data?.state;
+  const input = parseInput(sessionRequestSchema, { sessionId });
+  const session = await sessions.get(ownerId, input.sessionId);
+  if (!state || !Array.isArray(state.messages)) throw new HttpsError('invalid-argument', 'Invalid session data.');
+  const serialized = JSON.stringify(state);
+  if (Buffer.byteLength(serialized, 'utf8') > 8000000) throw new HttpsError('resource-exhausted', 'Session data is too large to save.');
+  const chunks = serialized.match(/[\s\S]{1,100000}/g) ?? [];
+  const ref = db.collection('sessions').doc(input.sessionId);
+  const old = await ref.collection('meteoState').get();
+  const batch = db.batch();
+  old.docs.forEach(doc => batch.delete(doc.ref));
+  chunks.forEach((data, index) => batch.set(ref.collection('meteoState').doc(String(index).padStart(5, '0')), { index, data }));
+  const first = state.messages.find((message: { role?: string; content?: string }) => message.role === 'user' && typeof message.content === 'string');
+  const title = session.session.title === 'New climate question' && first ? first.content.slice(0, 64).trim() : session.session.title;
+  const updated = { ...session.session, title, workflow: 'meteomatics' as const, updatedAt: new Date().toISOString() };
+  batch.update(ref, { title, workflow: updated.workflow, updatedAt: updated.updatedAt });
+  await batch.commit();
+  return { session: updated };
 });
 export const listSessions = onCall(callableOptions, async (request): Promise<ListSessionsResponse> => ({ sessions: await sessions.list(requireOwner(request)) }));
 export const getSession = onCall(callableOptions, async (request): Promise<GetSessionResponse> => {
@@ -106,6 +141,22 @@ export const searchLocations = onCall(callableOptions, async (request): Promise<
   catch { throw new HttpsError('unavailable', 'Location search is unavailable. Please try again later.'); }
 });
 
+export const getMeteomaticsSuggestions = onCall(callableOptions, async request => {
+  const ownerId = requireOwner(request);
+  const cacheKey = `meteomatics-suggestions:${new Date().toISOString().slice(0, 10)}`;
+  const cached = await cache.get<string[]>(cacheKey);
+  if (cached?.length) return { suggestions: cached };
+  await consumeQuota(db, ownerId, 'meteomaticsSuggestions');
+  try {
+    const suggestions = await generateMeteomaticsSuggestions();
+    await cache.set(cacheKey, suggestions, 86400);
+    return { suggestions };
+  } catch (error) {
+    logger.warn('Meteomatics suggestions unavailable', { kind: error instanceof Error ? error.name : 'unknown' });
+    throw new HttpsError('unavailable', 'Search suggestions are temporarily unavailable.');
+  }
+});
+
 export const getMeteomaticsCatalog = onCall(callableOptions, async (request): Promise<MeteomaticsCatalogResponse> => {
   requireOwner(request);
   return { version: METEOMATICS_CATALOG_VERSION, sourceUrl: METEOMATICS_CATALOG_SOURCE, parameters: [...METEOMATICS_PARAMETER_CATALOG] };
@@ -124,6 +175,8 @@ export const interpretMeteomatics = onCall(callableOptions, async (request): Pro
 
 export const checkMeteomaticsAvailability = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsAvailabilityResponse> => {
   const ownerId = requireOwner(request);
+  const sourceIssue = meteomaticsSourceIssue(request.data?.spec?.source);
+  if (sourceIssue) throw new HttpsError('invalid-argument', sourceIssue);
   const input = parseInput(meteomaticsAvailabilitySchema, request.data);
   await consumeQuota(db, ownerId, 'meteomaticsAvailability');
   try { return await meteomaticsQueries.checkAvailability(input.spec); }
@@ -136,6 +189,8 @@ export const checkMeteomaticsAvailability = onCall(meteomaticsCallableOptions, a
 
 export const executeMeteomaticsQuery = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsExecuteResponse> => {
   const ownerId = requireOwner(request);
+  const sourceIssue = meteomaticsSourceIssue(request.data?.spec?.source);
+  if (sourceIssue) throw new HttpsError('invalid-argument', sourceIssue);
   const input = parseInput(meteomaticsExecuteSchema, request.data);
   await consumeQuota(db, ownerId, 'meteomaticsExecute');
   try { return await meteomaticsQueries.execute(input.spec); }

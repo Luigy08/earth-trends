@@ -7,6 +7,7 @@ import { analysisSpecSchema } from './validation';
 import type { LocationSearch } from './providers/locations';
 import { METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { meteomaticsQuerySchema } from './validation';
+import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { METEOMATICS_ASSISTANT_PROMPT } from './meteomatics-assistant.constant';
 
 const intentYearSchema = z.number().int().min(1981).max(new Date().getUTCFullYear() - 1);
@@ -176,6 +177,8 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
   const value = response.output;
   if (!value) throw new Error('The model did not return a valid Meteomatics request.');
   const clarificationQuestions = value.clarificationQuestions.slice(0, 6).map(question => question.slice(0, 300));
+  const sourceIssue = meteomaticsSourceIssue(value.source);
+  if (sourceIssue) { value.ready = false; clarificationQuestions.push(sourceIssue); }
   let locationLabel: string | undefined;
   if (value.mode === 'point' && value.locationQuery) {
     const matches = await locations.search(value.locationQuery, 3);

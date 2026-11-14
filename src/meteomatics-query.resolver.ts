@@ -22,7 +22,7 @@ function appendValue(rows: MeteomaticsDisplayRow[], parameter: unknown, date: un
 }
 
 /** Normalizes Meteomatics' documented time-series JSON and route-style JSON into display rows. */
-export function resolveMeteomaticsResult(result: unknown): MeteomaticsDisplayResult | null {
+export function resolveMeteomaticsResult(result: unknown, limit = ROW_LIMIT): MeteomaticsDisplayResult | null {
   const root = asRecord(result);
   if (!root || !Array.isArray(root.data)) return null;
   const rows: MeteomaticsDisplayRow[] = [];
@@ -53,8 +53,19 @@ export function resolveMeteomaticsResult(result: unknown): MeteomaticsDisplayRes
   }
 
   if (!rows.length) return null;
-  return { rows: rows.slice(0, ROW_LIMIT), totalRows: rows.length, truncated: rows.length > ROW_LIMIT,
+  return { rows: rows.slice(0, limit), totalRows: rows.length, truncated: rows.length > limit,
     status: typeof root.status === 'string' ? root.status : null,
     version: typeof root.version === 'string' ? root.version : null,
   };
+}
+
+/** Downloads the complete provider payload, not the limited display rows. */
+export function downloadMeteomaticsJson(result: unknown, requestedAt: string): void {
+  const json = typeof result === 'string' ? JSON.stringify(JSON.parse(result) as unknown, null, 2) : JSON.stringify(result, null, 2);
+  const url = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `meteomatics-response-${requestedAt.replace(/[^0-9TZ-]/g, '-')}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

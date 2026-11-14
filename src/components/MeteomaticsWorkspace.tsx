@@ -1,9 +1,9 @@
 import ReactMarkdown from 'react-markdown';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Autocomplete, Button, Chip, CircularProgress, Collapse, TextField } from '@mui/material';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Autocomplete, Button, Chip, CircularProgress, Collapse, MenuItem, TextField } from '@mui/material';
 import { CheckCircleOutline, ExpandMore, Send } from '@mui/icons-material';
-import type { MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec } from '../../shared/types';
-import { executeMeteomaticsQuery, getMeteomaticsCatalog, interpretMeteomatics } from '../services/firebase';
+import type { MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec, MeteomaticsSessionState, ConversationSession } from '../../shared/types';
+import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestions, interpretMeteomatics, getMeteomaticsSession, saveMeteomaticsSession } from '../services/firebase';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 
 type ChatLine = { role: 'user' | 'assistant'; content: string };
@@ -19,7 +19,12 @@ const errorText = (cause: unknown) => {
   return cause instanceof Error ? cause.message : 'The Meteomatics service is unavailable.';
 };
 
-export function MeteomaticsWorkspace() {
+export function MeteomaticsWorkspace({ sessionId, onSessionUpdated }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void }) {
+  const [loaded, setLoaded] = useState(false);
+  const saveQueue = useRef(Promise.resolve());
+  const updatedCallback = useRef(onSessionUpdated);
+  updatedCallback.current = onSessionUpdated;
+  const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
   const [catalog, setCatalog] = useState<MeteomaticsCatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState('');
   const [catalogBusy, setCatalogBusy] = useState(true);
@@ -30,45 +35,77 @@ export function MeteomaticsWorkspace() {
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<MeteomaticsQuerySpec | null>(null);
   const [availability, setAvailability] = useState<MeteomaticsAvailabilityResponse | null>(null);
-  const [result, setResult] = useState<MeteomaticsExecuteResponse | null>(null);
+  const [results, setResults] = useState<MeteomaticsExecuteResponse[]>([]);
   const [showRequest, setShowRequest] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [summary, setSummary] = useState('');
   const [locationLabel, setLocationLabel] = useState('');
+  const sourceIssue = proposal?.source.trim().toLowerCase() === 'ecmwf' || !proposal?.source.trim();
   const options = useMemo(() => catalog?.parameters ?? [], [catalog]);
 
   useEffect(() => {
     void getMeteomaticsCatalog().then(setCatalog).catch(cause => setCatalogError(errorText(cause))).finally(() => setCatalogBusy(false));
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void getMeteomaticsSession(sessionId).then(({ state }) => {
+      if (!active) return;
+      if (state) {
+        setMessages(state.messages); setProposal(state.proposal); setResults(state.results ?? []);
+        setSuggestions(state.suggestions); setSummary(state.summary); setLocationLabel(state.locationLabel);
+        setSelectedParameters(state.selectedParameters ?? []);
+      }
+      setLoaded(true);
+    }).catch(cause => { if (active) setError(`Could not restore this session: ${errorText(cause)}`); });
+    return () => { active = false; };
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!loaded || messages.length === 0) return;
+    const state: MeteomaticsSessionState = { messages, proposal, results, suggestions, summary, locationLabel, selectedParameters };
+    saveQueue.current = saveQueue.current.catch(() => {}).then(async () => {
+        const { session } = await saveMeteomaticsSession(sessionId, state);
+        updatedCallback.current(session);
+      }).catch(cause => { setError(`Could not save this session: ${errorText(cause)}`); });
+  }, [loaded, sessionId, messages, proposal, results, suggestions, summary, locationLabel, selectedParameters]);
+
+  useEffect(() => {
+    let active = true;
+    void getMeteomaticsSuggestions().then(response => { if (active) setSearchSuggestions(response.suggestions); }).catch(() => { if (active) setSearchSuggestions([]); });
+    return () => { active = false; };
+  }, []);
+
   const send = async () => {
     const message = input.trim();
     if (!message || busy) return;
-    setBusy(true); setError(''); setSuggestions([]); setSummary(''); setProposal(null); setAvailability(null); setResult(null); setInput('');
+    setBusy(true); setError(''); setSuggestions([]); setSummary(''); setProposal(null); setAvailability(null); setInput('');
     const history = [...messages, { role: 'user' as const, content: message }];
     setMessages(history);
     try {
       const prompt = `${history.slice(-8).map(line => `${line.role}: ${line.content}`).join('\n')}\nSelected catalog parameters: ${selectedParameters.join(', ') || 'none'}`;
       const interpreted = await interpretMeteomatics({ query: prompt });
-      setSuggestions(interpreted.suggestions ?? []);
+      setSuggestions([]);
+      const optional = interpreted.suggestions?.length ? `\n\n**Optional suggestions**\n\n${interpreted.suggestions.map(item => `- ${item}`).join('\n')}` : '';
       setSummary(interpreted.summary);
       setLocationLabel(interpreted.locationLabel ?? '');
       if (interpreted.status === 'needs_clarification' || !interpreted.spec) {
-        setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Information needed**\n\n${interpreted.clarificationQuestions.map(question => `- ${question}`).join('\n')}` }]);
+        setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Information needed**\n\n${interpreted.clarificationQuestions.map(question => `- ${question}`).join('\n')}${optional}` }]);
         return;
       }
       const spec = interpreted.spec;
       setProposal(spec);
-      setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Ready to review**\n\nYour required details are complete. Submit when ready; availability will be determined by Meteomatics.` }]);
+      setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Ready to review**\n\nYour required details are complete. Submit when ready; availability will be determined by Meteomatics.${optional}` }]);
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
 
   const execute = async () => {
-    if (!proposal || busy) return;
+    if (!proposal || busy || sourceIssue) return;
     setBusy(true); setError('');
     try {
-      setResult(await executeMeteomaticsQuery({ spec: proposal, confirmed: true }));
+      const response = await executeMeteomaticsQuery({ spec: proposal, confirmed: true });
+      setResults(items => [...items, response]);
     }
     catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
@@ -86,18 +123,24 @@ export function MeteomaticsWorkspace() {
       {!messages.length && <div className="assistant-message"><span className="assistant-mark">✳</span><div><strong>What Meteomatics data do you need?</strong><p>Tell me which weather conditions interest you, where, and when. For a series, include how often you want a value. You can describe a city, an area, a station or a route in your own words.</p></div></div>}
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
-    {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>{locationLabel || 'Selected location'}{proposal.point ? ` · ${proposal.point.latitude}, ${proposal.point.longitude}` : ''}</p><p>Dates (UTC): {proposal.validDates}</p><p>Variables: {proposal.parameters.join(', ')} · Format: {proposal.format.toUpperCase()} · Source: {proposal.source}</p></div></div>
+    {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>{sourceIssue ? 'Choose a data source' : 'Ready to submit'}</strong><p>{summary}</p><p>{locationLabel || 'Selected location'}{proposal.point ? ` · ${proposal.point.latitude}, ${proposal.point.longitude}` : ''}</p><p>Dates (UTC): {proposal.validDates}</p><p>Variables: {proposal.parameters.join(', ')} · Format: {proposal.format.toUpperCase()} · Source: {proposal.source}</p></div></div>
+      <TextField select fullWidth size="small" label="Data source" value={sourceIssue ? '' : proposal.source} onChange={event => { setProposal(current => current ? { ...current, source: event.target.value } : current); setError(''); }} helperText={sourceIssue ? 'ECMWF offers several products. Select a specific source before submitting.' : 'Changing the source changes the dataset. Availability depends on your account and dates.'} sx={{ mt: 2 }}>
+        <MenuItem value="" disabled>Choose a source</MenuItem>
+        <MenuItem value="mix">Meteomatics Mix</MenuItem>
+        <MenuItem value="ecmwf-ifs">ECMWF IFS (forecast)</MenuItem>
+        {!sourceIssue && !['mix', 'ecmwf-ifs'].includes(proposal.source) && <MenuItem value={proposal.source}>{proposal.source}</MenuItem>}
+      </TextField>
       <div className="meteo-controls"><Button size="small" endIcon={<ExpandMore />} onClick={() => setShowRequest(value => !value)}>{showRequest ? 'Hide request' : 'Review request'}</Button>
-        <Button variant="contained" disabled={busy} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
+        <Button variant="contained" disabled={busy || sourceIssue} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
       <Collapse in={showRequest}><div className="meteo-request-details"><pre>{JSON.stringify(proposal, null, 2)}</pre><div>{(availability?.ranges ?? []).map(range => <Chip key={range.parameter} size="small" color={range.requestedWithinRange ? 'success' : 'error'} label={`${range.parameter}: ${range.minDate || 'unavailable'} → ${range.maxDate || 'unavailable'}`} />)}</div></div></Collapse>
     </div>}
       {busy && <div className="conversation-message assistant"><div className="typing-indicator"><CircularProgress size={14} /> Checking the request…</div></div>}
     </div>
-    <div className="composer"><TextField fullWidth multiline maxRows={4} value={input} onChange={event => setInput(event.target.value)}
+    <div className="meteo-composer"><div className="meteo-search-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div><div className="composer"><TextField fullWidth multiline maxRows={4} value={input} onChange={event => setInput(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Describe a Meteomatics request…" aria-label="Message the Meteomatics assistant" slotProps={{ htmlInput: { maxLength: 2000 } }} />
-      <Button variant="contained" aria-label="Send message" disabled={!input.trim() || busy || catalogBusy} onClick={() => void send()}><Send /></Button></div>
+      <Button variant="contained" aria-label="Send message" disabled={!input.trim() || busy || catalogBusy || !loaded} onClick={() => void send()}><Send /></Button></div></div>
     {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
-    {result && <MeteomaticsResponse result={result} />}
+    {results.map((result, index) => <MeteomaticsResponse key={`${result.requestedAt}-${index}`} result={result} />)}
     <span className="composer-hint">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
   </section>;
 }

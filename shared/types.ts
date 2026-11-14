@@ -51,6 +51,7 @@ export interface ConversationSession {
   createdAt: string;
   updatedAt: string;
   analysisId?: string;
+  workflow?: 'meteomatics' | 'trend';
 }
 export interface ListSessionsResponse { sessions: ConversationSession[] }
 export interface SessionRequest { sessionId: string }
@@ -93,7 +94,7 @@ export interface InterpretMeteomaticsResponse { status: 'ready' | 'needs_clarifi
 export interface MeteomaticsAvailabilityRequest { spec: MeteomaticsQuerySpec }
 export interface MeteomaticsAvailabilityResponse { available: boolean; ranges: Array<{ parameter: string; minDate: string; maxDate: string; requestedWithinRange: boolean }>; message?: string }
 export interface MeteomaticsExecuteRequest { spec: MeteomaticsQuerySpec; confirmed: true }
-export interface MeteomaticsExecuteResponse { provider: 'Meteomatics'; source: string; requestedAt: string; request: Omit<MeteomaticsQuerySpec, 'trajectory'> & { trajectory?: MeteomaticsTrajectoryPoint[] }; responseFormat: string; result: unknown; provenance: DataProvenance }
+export interface MeteomaticsExecuteResponse { provider: 'Meteomatics'; source: string; requestedAt: string; request: Omit<MeteomaticsQuerySpec, 'trajectory'> & { trajectory?: MeteomaticsTrajectoryPoint[] }; responseFormat: string; result: unknown; provenance: DataProvenance; chartTrends?: MeteomaticsChartTrend[] }
 
 /** Public result values: temperature °C; precipitation mm/month. Internal providers use mm/day. */
 export interface MonthlyObservation { year: number; month: number; value: number | null }
@@ -174,3 +175,25 @@ export interface Analysis {
   result?: AnalysisResult;
   error?: { code: string; message: string };
 }
+
+export interface MeteomaticsSessionState {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  proposal: MeteomaticsQuerySpec | null;
+  results: MeteomaticsExecuteResponse[];
+  suggestions: string[];
+  summary: string;
+  locationLabel: string;
+  selectedParameters: string[];
+}
+
+export interface MeteomaticsChartTrend {
+  parameter: string;
+  latitude: number;
+  longitude: number;
+  annual: AnnualObservation[];
+  trend: TrendStatistics | null;
+  requestedYears: number;
+  dailyFit?: { origin: number; slopePerYear: number; intercept: number; mean: number; maximum: number; rSquared: number | null; count: number } | null;
+}
+
+export interface MeteomaticsSuggestionsResponse { suggestions: string[] }

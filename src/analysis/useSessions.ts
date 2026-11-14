@@ -111,5 +111,10 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
     } catch (cause) { setError(errorMessage(cause)); }
   }, [sessions, current, open, onRestoreAnalysis, create]);
 
-  return { sessions, current, messages, proposal, busy, error, create, open, send, submit, rename, remove };
+  const updateSession = useCallback((session: ConversationSession) => {
+    setSessions(items => [session, ...items.filter(item => item?.id !== session.id)]);
+    setCurrent(item => item?.id === session.id ? session : item);
+  }, []);
+
+  return { updateSession, sessions, current, messages, proposal, busy, error, create, open, send, submit, rename, remove };
 }

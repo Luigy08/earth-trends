@@ -57,3 +57,8 @@ export const getMeteomaticsCatalog = () => call<Record<string, never>, Meteomati
 export const interpretMeteomatics = (data: InterpretMeteomaticsRequest) => call<InterpretMeteomaticsRequest, InterpretMeteomaticsResponse>('interpretMeteomatics', data);
 export const checkMeteomaticsAvailability = (data: MeteomaticsAvailabilityRequest) => call<MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse>('checkMeteomaticsAvailability', data);
 export const executeMeteomaticsQuery = (data: MeteomaticsExecuteRequest) => call<MeteomaticsExecuteRequest, MeteomaticsExecuteResponse>('executeMeteomaticsQuery', data);
+
+export const getMeteomaticsSession = (sessionId: string) => call<{ sessionId: string }, { state: import('../../shared/types').MeteomaticsSessionState | null }>('getMeteomaticsSession', { sessionId });
+export const saveMeteomaticsSession = (sessionId: string, state: import('../../shared/types').MeteomaticsSessionState) => call<{ sessionId: string; state: import('../../shared/types').MeteomaticsSessionState }, { session: ConversationSession }>('saveMeteomaticsSession', { sessionId, state });
+
+export const getMeteomaticsSuggestions = () => call<Record<string, never>, import('../../shared/types').MeteomaticsSuggestionsResponse>('getMeteomaticsSuggestions', {});

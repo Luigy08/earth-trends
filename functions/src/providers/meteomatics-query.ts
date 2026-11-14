@@ -1,5 +1,6 @@
 import type { MeteomaticsAvailabilityResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec } from '../../../shared/types';
 import type { CacheStore } from '../backend.types';
+import { resolveMeteomaticsChart } from '../meteomatics-chart.resolver';
 import { CONFIG } from '../config.constant';
 import { SourceError } from '../http';
 import { meteomaticsHeaders } from './meteomatics';
@@ -96,7 +97,7 @@ export class MeteomaticsQueryProvider {
     const endpoint = usePost ? (url.split('?')[0] ?? url) : url;
     const body = spec.mode === 'trajectory' ? trajectoryBody(spec)
       : usePost ? `${spec.parameters.join(',')}/${encodeURIComponent(locationPath(spec))}/${spec.format}?${url.split('?')[1] ?? ''}` : undefined;
-    const cacheKey = `meteomatics-query-v1:${url}:${body ?? ''}`;
+    const cacheKey = `meteomatics-query-v3:${url}:${body ?? ''}`;
     const cached = await this.cache.get<MeteomaticsExecuteResponse>(cacheKey);
     if (cached) return cached;
     const resultText = await requestText(endpoint, { method: usePost ? 'POST' : 'GET', ...(body ? { body, headers: { 'Content-Type': 'text/plain' } } : {}) });
@@ -104,7 +105,7 @@ export class MeteomaticsQueryProvider {
     try { result = JSON.parse(resultText) as unknown; } catch { result = resultText; }
     const requestedAt = new Date().toISOString();
     const output: MeteomaticsExecuteResponse = {
-      provider: 'Meteomatics', source: spec.source, requestedAt, request: spec, responseFormat: spec.format, result,
+      provider: 'Meteomatics', source: spec.source, requestedAt, request: spec, responseFormat: spec.format, result, chartTrends: resolveMeteomaticsChart(result, spec),
       provenance: { provider: 'Meteomatics', dataset: `Meteomatics Weather API (${spec.source})`, parameters: spec.parameters,
         sourceUrl: `${API}/`, retrievedAt: requestedAt, temporalResolution: 'request-defined',
         isHistorical: Boolean(requestBounds(spec) && requestBounds(spec)![1].slice(0, 16) < requestedAt.slice(0, 16)),

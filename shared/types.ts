@@ -193,6 +193,9 @@ export interface MeteomaticsChartTrend {
   annual: AnnualObservation[];
   trend: TrendStatistics | null;
   requestedYears: number;
+  aggregation?: 'mean' | 'sum';
+  monthly?: MonthlyObservation[];
+  excludedYears?: number[];
   dailyFit?: { origin: number; slopePerYear: number; intercept: number; mean: number; maximum: number; rSquared: number | null; count: number } | null;
 }
 

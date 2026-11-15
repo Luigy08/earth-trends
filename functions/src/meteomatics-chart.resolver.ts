@@ -14,10 +14,13 @@ export function resolveMeteomaticsChart(result: unknown, spec: MeteomaticsQueryS
   const output: MeteomaticsChartTrend[] = [];
   for (const item of root.data) for (const coordinate of item.coordinates ?? []) {
     if (!item.parameter || !Array.isArray(coordinate.dates) || typeof coordinate.lat !== 'number' || typeof coordinate.lon !== 'number') continue;
+    const aggregation = item.parameter === 'precip_24h:mm' ? 'sum' : item.parameter === 't_mean_2m_24h:C' || /^volumetric_soil_water_-\d+cm:m3m3$/.test(item.parameter) ? 'mean' : null;
+    if (!aggregation) continue;
     const byYear = new Map<number, Map<string, number>>();
     const samples = new Map<number, number>();
     for (const entry of coordinate.dates) {
       if (typeof entry.date !== 'string' || !/^\d{4}-\d{2}-\d{2}T00:00:00Z$/.test(entry.date) || typeof entry.value !== 'number' || !Number.isFinite(entry.value) || [-999, -888, -777, -666].includes(entry.value)) continue;
+      if (aggregation === 'sum' && entry.value < 0) continue;
       const timestamp = Date.parse(entry.date);
       if (!Number.isFinite(timestamp)) continue;
       samples.set(timestamp, entry.value);
@@ -26,9 +29,20 @@ export function resolveMeteomaticsChart(result: unknown, spec: MeteomaticsQueryS
       days.set(entry.date.slice(0, 10), entry.value); byYear.set(year, days);
     }
     const annual: AnnualObservation[] = [];
+    const monthly: import('../../shared/types').MonthlyObservation[] = [];
     for (let year = start; year <= end; year++) {
       const days = byYear.get(year); const expected = (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / 86400000;
-      if (days?.size === expected) annual.push({ year, value: [...days.values()].reduce((a, b) => a + b, 0) / expected, anomaly: null });
+      for (let month = 1; month <= 12; month++) {
+        const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+        const values = [...(days ?? new Map<string, number>())].filter(([date]) => date.startsWith(prefix)).map(([, value]) => value);
+        const count = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        const total = values.reduce((sum, value) => sum + value, 0);
+        monthly.push({ year, month, value: values.length === count ? aggregation === 'sum' ? total : total / count : null });
+      }
+      if (days?.size === expected) {
+        const total = [...days.values()].reduce((a, b) => a + b, 0);
+        annual.push({ year, value: aggregation === 'sum' ? total : total / expected, anomaly: null });
+      }
     }
     const requestedYears = end - start + 1;
     const points = [...samples].sort(([a], [b]) => a - b);
@@ -41,7 +55,13 @@ export function resolveMeteomaticsChart(result: unknown, spec: MeteomaticsQueryS
     const sst = points.reduce((sum, [, value]) => sum + (value - mean) ** 2, 0);
     const sse = points.reduce((sum, [time, value]) => sum + (value - intercept - slopePerYear * (time - origin) / 31556952000) ** 2, 0);
     const dailyFit = points.length > 1 && sxx > 0 ? { origin, slopePerYear, intercept, mean, maximum: points.reduce((max, [, value]) => Math.max(max, value), -Infinity), rSquared: sst ? Math.max(0, Math.min(1, 1 - sse / sst)) : null, count: points.length } : null;
-    output.push({ parameter: item.parameter, latitude: coordinate.lat, longitude: coordinate.lon, annual, requestedYears,
+    const baseline = annual.filter(point => point.year >= 1991 && point.year <= 2020);
+    if (baseline.length === 30) {
+      const baselineMean = baseline.reduce((sum, point) => sum + point.value, 0) / 30;
+      annual.forEach(point => { point.anomaly = point.value - baselineMean; });
+    }
+    output.push({ parameter: item.parameter, latitude: coordinate.lat, longitude: coordinate.lon, annual, requestedYears, aggregation, monthly,
+      excludedYears: Array.from({ length: requestedYears }, (_, index) => start + index).filter(year => !annual.some(point => point.year === year)),
       trend: annual.length >= 10 && annual.length / requestedYears >= 0.8 ? calculateTrend(annual) : null, dailyFit });
   }
   return output;

@@ -21,7 +21,7 @@ export const CONFIG = {
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   // Production defaults to enforcement; only the local emulator defaults off.
   enforceAppCheck: booleanEnv('ENFORCE_APP_CHECK', false),
-  maxInstances: positiveInteger('MAX_INSTANCES', 2),
+  maxInstances: positiveInteger('MAX_INSTANCES', 1),
   globalDailyQuota: positiveInteger('QUOTA_GLOBAL_DAILY', 100),
   globalInterpretDailyQuota: positiveInteger('QUOTA_GLOBAL_INTERPRET_DAILY', 1000),
   globalSearchDailyQuota: positiveInteger('QUOTA_GLOBAL_SEARCH_DAILY', 2000),

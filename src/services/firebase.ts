@@ -62,7 +62,9 @@ export const renameSession = (data: RenameSessionRequest) => call<RenameSessionR
 export const deleteSession = (data: SessionRequest) => call<SessionRequest, DeleteSessionResponse>('deleteSession', data);
 export const chatSession = (data: ChatSessionRequest) => call<ChatSessionRequest, ChatSessionResponse>('chatSession', data);
 export const attachSessionAnalysis = (data: AttachSessionAnalysisRequest) => call<AttachSessionAnalysisRequest, AttachSessionAnalysisResponse>('attachSessionAnalysis', data);
-export const getMeteomaticsCatalog = () => call<Record<string, never>, MeteomaticsCatalogResponse>('getMeteomaticsCatalog', {});
+let catalogCache: Promise<MeteomaticsCatalogResponse> | undefined;
+let suggestionsCache: Promise<import('../../shared/types').MeteomaticsSuggestionsResponse> | undefined;
+export const getMeteomaticsCatalog = () => catalogCache ??= call<Record<string, never>, MeteomaticsCatalogResponse>('getMeteomaticsCatalog', {}).catch(error => { catalogCache = undefined; throw error; });
 export const interpretMeteomatics = (data: InterpretMeteomaticsRequest) => call<InterpretMeteomaticsRequest, InterpretMeteomaticsResponse>('interpretMeteomatics', data);
 export const checkMeteomaticsAvailability = (data: MeteomaticsAvailabilityRequest) => call<MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse>('checkMeteomaticsAvailability', data);
 export const executeMeteomaticsQuery = (data: MeteomaticsExecuteRequest) => call<MeteomaticsExecuteRequest, MeteomaticsExecuteResponse>('executeMeteomaticsQuery', data);
@@ -70,4 +72,7 @@ export const executeMeteomaticsQuery = (data: MeteomaticsExecuteRequest) => call
 export const getMeteomaticsSession = (sessionId: string) => call<{ sessionId: string }, { state: import('../../shared/types').MeteomaticsSessionState | null }>('getMeteomaticsSession', { sessionId });
 export const saveMeteomaticsSession = (sessionId: string, state: import('../../shared/types').MeteomaticsSessionState) => call<{ sessionId: string; state: import('../../shared/types').MeteomaticsSessionState }, { session: ConversationSession }>('saveMeteomaticsSession', { sessionId, state });
 
-export const getMeteomaticsSuggestions = () => call<Record<string, never>, import('../../shared/types').MeteomaticsSuggestionsResponse>('getMeteomaticsSuggestions', {});
+export const getMeteomaticsSuggestions = (refresh = false) => {
+  if (refresh) suggestionsCache = undefined;
+  return suggestionsCache ??= call<Record<string, never>, import('../../shared/types').MeteomaticsSuggestionsResponse>('getMeteomaticsSuggestions', {}).catch(error => { suggestionsCache = undefined; throw error; });
+};

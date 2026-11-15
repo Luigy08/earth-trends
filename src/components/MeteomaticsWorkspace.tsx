@@ -26,6 +26,7 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
   const [loaded, setLoaded] = useState(false);
   const saveQueue = useRef(Promise.resolve());
+  const pendingSave = useRef<(() => void) | null>(null);
   const updatedCallback = useRef(onSessionUpdated);
   updatedCallback.current = onSessionUpdated;
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
@@ -69,16 +70,21 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
   useEffect(() => {
     if (!loaded || messages.length === 0) return;
     const state: MeteomaticsSessionState = { messages, proposal, results, suggestions, summary, locationLabel, selectedParameters };
-    saveQueue.current = saveQueue.current.catch(() => {}).then(async () => {
+    const save = () => { pendingSave.current = null; saveQueue.current = saveQueue.current.catch(() => {}).then(async () => {
         const { session } = await saveMeteomaticsSession(sessionId, state);
         updatedCallback.current(session);
-      }).catch(cause => { setError(`Could not save this session: ${errorText(cause)}`); });
+      }).catch(cause => { setError(`Could not save this session: ${errorText(cause)}`); }); };
+    pendingSave.current = save;
+    const timer = window.setTimeout(save, 750);
+    return () => window.clearTimeout(timer);
   }, [loaded, sessionId, messages, proposal, results, suggestions, summary, locationLabel, selectedParameters]);
 
-  const refreshSearchSuggestions = async () => {
+  useEffect(() => () => { pendingSave.current?.(); }, []);
+
+  const refreshSearchSuggestions = async (refresh = false) => {
     setSuggestionsBusy(true);
     try {
-      const response = await getMeteomaticsSuggestions();
+      const response = await getMeteomaticsSuggestions(refresh);
       setSearchSuggestions(response.suggestions);
     } catch (cause) {
       setError(errorText(cause));
@@ -159,7 +165,7 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
     <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the Meteomatics assistant" maxLength={2000} placeholder="Ask for weather data: what, where and when…"
         canSubmit={Boolean(input.trim() || selectedParameters.length) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
-      {empty && (searchSuggestions.length > 0 || suggestionsBusy) && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}<Tooltip title="Refresh suggestions"><span><IconButton className="suggestions-refresh" size="small" aria-label="Refresh suggestions" onClick={() => void refreshSearchSuggestions()} disabled={suggestionsBusy || busy || !loaded}>{suggestionsBusy ? <CircularProgress size={15} /> : <Refresh fontSize="small" />}</IconButton></span></Tooltip></div>}
+      {empty && (searchSuggestions.length > 0 || suggestionsBusy) && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}<Tooltip title="Refresh suggestions"><span><IconButton className="suggestions-refresh" size="small" aria-label="Refresh suggestions" onClick={() => void refreshSearchSuggestions(true)} disabled={suggestionsBusy || busy || !loaded}>{suggestionsBusy ? <CircularProgress size={15} /> : <Refresh fontSize="small" />}</IconButton></span></Tooltip></div>}
       <span className="chat-disclaimer">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
     </div>
   </section>;

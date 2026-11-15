@@ -1,12 +1,11 @@
 import { FirebaseError, initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { connectAuthEmulator, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
 import { ENV_KEYS } from '../app.constant';
 
 const env = import.meta.env;
-export const missingConfig = ENV_KEYS.filter(key => !env[key] && !(key === 'VITE_FIREBASE_APPCHECK_SITE_KEY' && env.VITE_USE_FIREBASE_EMULATORS === 'true'));
+export const missingConfig = ENV_KEYS.filter(key => !env[key]);
 export const isConfigured = missingConfig.length === 0;
 let firebaseApp: FirebaseApp | undefined;
 let functions: ReturnType<typeof getFunctions> | undefined;
@@ -15,12 +14,6 @@ function initialize() {
   if (!isConfigured) throw new Error('Configure Firebase to query live data.');
   if (!firebaseApp || !functions) {
     firebaseApp = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
-    if (env.VITE_USE_FIREBASE_EMULATORS !== 'true') {
-      if (import.meta.env.DEV && window.location.hostname === 'localhost') {
-        (self as typeof self & { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
-      }
-      initializeAppCheck(firebaseApp, { provider: new ReCaptchaEnterpriseProvider(env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
-    }
     const auth = getAuth(firebaseApp);
     functions = getFunctions(firebaseApp, env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1');
     if (env.VITE_USE_FIREBASE_EMULATORS === 'true') {

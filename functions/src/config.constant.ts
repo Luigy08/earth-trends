@@ -20,7 +20,7 @@ export const CONFIG = {
   vertexLocation: process.env.VERTEX_LOCATION || 'global',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   // Production defaults to enforcement; only the local emulator defaults off.
-  enforceAppCheck: booleanEnv('ENFORCE_APP_CHECK', process.env.FUNCTIONS_EMULATOR !== 'true'),
+  enforceAppCheck: booleanEnv('ENFORCE_APP_CHECK', false),
   maxInstances: positiveInteger('MAX_INSTANCES', 2),
   globalDailyQuota: positiveInteger('QUOTA_GLOBAL_DAILY', 100),
   globalInterpretDailyQuota: positiveInteger('QUOTA_GLOBAL_INTERPRET_DAILY', 1000),

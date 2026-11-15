@@ -193,7 +193,7 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
     }
   }
   const metadata = { suggestions: value.suggestions.slice(0, 3), ...(locationLabel ? { locationLabel } : {}) };
-  if (value.ready && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
+  if ((value.ready || clarificationQuestions.length === 0) && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
     const specCandidate = {
       options: Object.fromEntries(Object.entries(value.options ?? {}).filter(([, entry]) => entry !== null)),
       mode: value.mode, source: value.source, parameters: value.parameters, validDates: value.validDates.replace(/(Z|[+-]\d{2}:?\d{2})\/(?=\d{4}-\d{2}-\d{2}T)/g, '$1--'), format: value.format,

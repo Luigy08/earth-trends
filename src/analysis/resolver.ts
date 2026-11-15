@@ -102,7 +102,7 @@ export function downloadCsv(analysis: Analysis) {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    if (/unauthenticated|permission-denied/i.test(error.message)) return 'Could not verify your session. Check anonymous authentication and App Check.';
+    if (/unauthenticated|permission-denied/i.test(error.message)) return 'Could not verify your session. Sign in again and check the app configuration.';
     if (/unavailable|network|fetch|internal/i.test(error.message)) return 'Could not connect to the service. Check your connection and try again.';
     return error.message;
   }

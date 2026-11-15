@@ -4,13 +4,13 @@ NASA Space Apps POC for natural-language climate questions, historical temperatu
 
 ## Development
 
-Requires Node.js 22 and Firebase CLI. Install dependencies with `npm install` and `npm --prefix functions install`. Copy `.env.example` to `.env.local` and provide the public Firebase web app configuration, reCAPTCHA Enterprise site key, and CARTO basemap API key. Run `npm run dev` to start the web app.
+Requires Node.js 22 and Firebase CLI. Install dependencies with `npm install` and `npm --prefix functions install`. Copy `.env.example` to `.env.local` and provide the public Firebase web app configuration and CARTO basemap API key. Run `npm run dev` to start the web app.
 
 Firebase web configuration and the CARTO basemap key are public client-side values, not administrative credentials. Never prefix Meteomatics credentials with `VITE_`.
 
 ## Infrastructure
 
-Firebase project: `earth-trend-detective`. Functions and Firestore region: `us-central1`. Vertex AI location: `global`. Enable anonymous Authentication and register the app in App Check with reCAPTCHA Enterprise for each Hosting domain. Production Functions enforce App Check.
+Firebase project: `earth-trend-detective`. Functions and Firestore region: `us-central1`. Vertex AI location: `global`. Enable Google Authentication and authorize the app domain. App Check is disabled for this test project; callable functions still require Google Authentication.
 
 The project uses the Blaze plan. A reference USD 10 budget alert was configured; alerts do not cap usage. The backend limits analyses per session and day and sets a maximum of two instances per function.
 
@@ -22,7 +22,7 @@ To upload credentials from the ignored local file, run `node scripts/configure-m
 
 ## Build and deployment
 
-Run `npm run build`, `npm test`, `npm --prefix functions run build`, and `npm --prefix functions test`. Authenticate Firebase CLI with the project owner account. Deploy a preview using `firebase hosting:channel:deploy preview --expires 7d --project earth-trend-detective`; deploy services and web using `firebase deploy --project earth-trend-detective`. App Check must also allow the exact preview domain when using backend callables there.
+Run `npm run build`, `npm test`, `npm --prefix functions run build`, and `npm --prefix functions test`. Authenticate Firebase CLI with the project owner account. Deploy a preview using `firebase hosting:channel:deploy preview --expires 7d --project earth-trend-detective`; deploy services and web using `firebase deploy --project earth-trend-detective`.
 
 ## Scientific interpretation
 

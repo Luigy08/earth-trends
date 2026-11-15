@@ -144,13 +144,9 @@ export const searchLocations = onCall(callableOptions, async (request): Promise<
 
 export const getMeteomaticsSuggestions = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);
-  const cacheKey = `meteomatics-suggestions:${new Date().toISOString().slice(0, 10)}`;
-  const cached = await cache.get<string[]>(cacheKey);
-  if (cached?.length) return { suggestions: cached };
   await consumeQuota(db, ownerId, 'meteomaticsSuggestions');
   try {
     const suggestions = await generateMeteomaticsSuggestions();
-    await cache.set(cacheKey, suggestions, 86400);
     return { suggestions };
   } catch (error) {
     logger.warn('Meteomatics suggestions unavailable', { kind: error instanceof Error ? error.name : 'unknown' });

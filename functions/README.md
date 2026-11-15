@@ -6,7 +6,7 @@ TypeScript / Node 22, Firebase Functions v2, Firestore queue, Genkit with Vertex
 
 `../shared/types.ts` is the public frontend contract. `npm run build` emits `lib/functions/src/index.js` and `lib/shared/types.js` / `.d.ts`; Firebase packages the complete runtime inside `functions/`. The frontend imports source types with `import type`.
 
-All callables require Firebase Authentication. `ENFORCE_APP_CHECK` defaults **true in production** and false only in the Functions emulator. Invalid boolean values fail function discovery rather than silently disabling enforcement. Set `ENFORCE_APP_CHECK=true` in the production project environment and register App Check on clients before requests.
+All callables require Google Firebase Authentication. App Check enforcement is disabled for this test project with `ENFORCE_APP_CHECK=false`. Invalid boolean values fail function discovery.
 
 | Callable | Input | Output |
 | --- | --- | --- |

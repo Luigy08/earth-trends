@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Autocomplete, Badge, Button, Chip, CircularProgress, Collapse, IconButton, MenuItem, Popover, TextField, Tooltip } from '@mui/material';
-import { CheckCircleOutline, ExpandMore, TuneOutlined } from '@mui/icons-material';
+import { CheckCircleOutline, ExpandMore, Refresh, TuneOutlined } from '@mui/icons-material';
 import type { MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec, MeteomaticsSessionState, ConversationSession } from '../../shared/types';
 import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestions, interpretMeteomatics, getMeteomaticsSession, saveMeteomaticsSession } from '../services/firebase';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
@@ -29,6 +29,7 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
   const updatedCallback = useRef(onSessionUpdated);
   updatedCallback.current = onSessionUpdated;
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
+  const [suggestionsBusy, setSuggestionsBusy] = useState(false);
   const [catalog, setCatalog] = useState<MeteomaticsCatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState('');
   const [catalogBusy, setCatalogBusy] = useState(true);
@@ -74,14 +75,22 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
       }).catch(cause => { setError(`Could not save this session: ${errorText(cause)}`); });
   }, [loaded, sessionId, messages, proposal, results, suggestions, summary, locationLabel, selectedParameters]);
 
-  useEffect(() => {
-    let active = true;
-    void getMeteomaticsSuggestions().then(response => { if (active) setSearchSuggestions(response.suggestions); }).catch(() => { if (active) setSearchSuggestions([]); });
-    return () => { active = false; };
-  }, []);
+  const refreshSearchSuggestions = async () => {
+    setSuggestionsBusy(true);
+    try {
+      const response = await getMeteomaticsSuggestions();
+      setSearchSuggestions(response.suggestions);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setSuggestionsBusy(false);
+    }
+  };
+
+  useEffect(() => { void refreshSearchSuggestions(); }, []);
 
   const send = async () => {
-    const message = input.trim();
+    const message = input.trim() || (selectedParameters.length ? `Use these selected parameters: ${selectedParameters.join(', ')}.` : '');
     if (!message || busy) return;
     setBusy(true); setError(''); setSuggestions([]); setSummary(''); setProposal(null); setAvailability(null); setInput('');
     const history = [...messages, { role: 'user' as const, content: message }];
@@ -149,8 +158,8 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
     <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the Meteomatics assistant" maxLength={2000} placeholder="Ask for weather data: what, where and when…"
-        canSubmit={Boolean(input.trim()) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
-      {empty && searchSuggestions.length > 0 && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
+        canSubmit={Boolean(input.trim() || selectedParameters.length) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
+      {empty && (searchSuggestions.length > 0 || suggestionsBusy) && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}<Tooltip title="Refresh suggestions"><span><IconButton className="suggestions-refresh" size="small" aria-label="Refresh suggestions" onClick={() => void refreshSearchSuggestions()} disabled={suggestionsBusy || busy || !loaded}>{suggestionsBusy ? <CircularProgress size={15} /> : <Refresh fontSize="small" />}</IconButton></span></Tooltip></div>}
       <span className="chat-disclaimer">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
     </div>
   </section>;

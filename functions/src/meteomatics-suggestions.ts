@@ -10,6 +10,6 @@ export async function generateMeteomaticsSuggestions(): Promise<string[]> {
   const response = await ai.generate({ model: vertexAI.model(CONFIG.geminiModel), config: { maxOutputTokens: 2048 }, output: { schema }, system: METEOMATICS_SUGGESTIONS_PROMPT, prompt: `Today is ${new Date().toISOString().slice(0, 10)}. Generate the examples.` });
   const suggestions = response.output?.suggestions.map(item => item.trim()).filter(item => item.length >= 20 && item.length <= 250) ?? [];
   const unique = [...new Set(suggestions)];
-  if (unique.length < 3) throw new Error('Suggestions are unavailable.');
-  return unique.slice(0, 3);
+  if (unique.length < 5) throw new Error('Suggestions are unavailable.');
+  return unique.slice(0, 5);
 }

@@ -1,8 +1,10 @@
-import type { AnalysisPeriod, AnalysisResult, AnalysisSpec, AnnualObservation, Location, LocationAnalysis } from '../../shared/types';
+import type { AnalysisPeriod, AnalysisResult, AnalysisSpec, AnnualObservation, HistoricalDataSource, HistoricalProviderName, Location, LocationAnalysis } from '../../shared/types';
 import type { CacheStore, ClimateProvider, ClimateSeries } from './backend.types';
 import { BASELINE, METHODOLOGY_VERSION, MIN_COVERAGE, MIN_YEARS } from './config.constant';
 import { annualize, calculateTrend, daysInMonth } from './statistics';
 import { getCurrentWeather, WEATHER_NOTICE } from './providers/current-weather';
+
+const PROVIDER_NAMES: Record<HistoricalDataSource, HistoricalProviderName> = { meteomatics: 'Meteomatics', giovanni: 'NASA Giovanni' };
 
 function yearsOf(period: AnalysisPeriod): number[] {
   return Array.from({ length: period.endYear - period.startYear + 1 }, (_, i) => period.startYear + i);
@@ -34,7 +36,7 @@ export function summarizeSeries(location: Location, spec: AnalysisSpec, period: 
     quality: { requestedYears: requested.length, completeYears: annual.length, coverage,
       excludedYears: requested.filter(y => !present.has(y)), baselineYears: baselineAnnual.length, warnings },
     baseline: { ...BASELINE, mean: baselineMean },
-    source: 'Meteomatics', provenance: series?.provenance ?? null,
+    source: PROVIDER_NAMES[spec.dataSource ?? 'meteomatics'], provenance: series?.provenance ?? null,
     currentWeather: { status: 'source_unavailable', observedAt: null, temperatureC: null, precipitationMm: null, provenance: null, notice: WEATHER_NOTICE },
   };
 }
@@ -74,12 +76,17 @@ export function assembleResult(spec: AnalysisSpec, locations: LocationAnalysis[]
 }
 
 export class AnalysisService {
-  constructor(private readonly provider: ClimateProvider, private readonly cache: CacheStore) {}
+  /** `provider` serves Meteomatics (the default source); `providers` adds alternative historical sources such as Giovanni. */
+  constructor(private readonly provider: ClimateProvider, private readonly cache: CacheStore,
+    private readonly providers: Partial<Record<Exclude<HistoricalDataSource, 'meteomatics'>, ClimateProvider>> = {}) {}
   async run(spec: AnalysisSpec): Promise<AnalysisResult> {
+    // A source that is not wired in yields source_unavailable; there is no fallback to another provider.
+    const provider = !spec.dataSource || spec.dataSource === 'meteomatics' ? this.provider : this.providers[spec.dataSource];
     const startYear = Math.min(BASELINE.startYear, spec.startYear, spec.secondPeriod?.startYear ?? spec.startYear);
     const endYear = Math.max(BASELINE.endYear, spec.endYear, spec.secondPeriod?.endYear ?? spec.endYear);
     const series = await Promise.all(spec.locations.map(async location => {
-      try { return await this.provider.getMonthly(location, spec.metric, startYear, endYear); }
+      if (!provider) return null;
+      try { return await provider.getMonthly(location, spec.metric, startYear, endYear); }
       catch { return null; }
     }));
     let commonYears: number[] = [];

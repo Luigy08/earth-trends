@@ -11,6 +11,10 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 export const SERIES_COLORS = [COLORS.green700, COLORS.accent];
 export const CHART_VIEWS = [{ value: 'annual', label: 'Annual' }, { value: 'monthly', label: 'Monthly' }, { value: 'anomaly', label: 'Anomalies' }] as const;
 export const WORKFLOW_OPTIONS = [{ value: 'meteomatics', label: 'Meteomatics data', description: 'Raw values from the Meteomatics Weather API' }, { value: 'trend', label: 'Trend analysis', description: 'Historical trends with statistical significance' }] as const;
+export const HISTORICAL_SOURCE_OPTIONS = [
+  { value: 'meteomatics', label: 'Meteomatics', description: 'Daily aggregates converted to complete months' },
+  { value: 'giovanni', label: 'NASA Giovanni', description: 'MERRA-2 monthly means via NASA GES DISC' },
+] as const;
 export const ENV_KEYS = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID'] as const;
 export const AUTH_ERROR_MESSAGES: Record<string, string> = {
   'auth/popup-closed-by-user': '',

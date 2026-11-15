@@ -27,7 +27,8 @@ Firebase (project `earth-trend-detective`, region `us-central1`):
 - Emulators (auth 9099, functions 5001, firestore 8080, hosting 5000): `firebase emulators:start`. Local Meteomatics credentials go in ignored `functions/.env.local` / `.secret.local`.
 - Preview: `firebase hosting:channel:deploy preview --expires 7d --project earth-trend-detective`
 - Full deploy: `firebase deploy --project earth-trend-detective` (functions predeploy runs the functions build)
-- Upload Meteomatics secrets: `node scripts/configure-meteomatics.mjs <deployment-account-email>`
+- Upload Meteomatics secrets: `node scripts/configure-meteomatics.mjs <deployment-account-email>`; Earthdata (Giovanni) secrets: append `earthdata`
+- Inspect Giovanni data mapped to the Meteomatics/ClimateSeries shape: `node scripts/giovanni-to-meteomatics.mjs --metric temperature --lat <lat> --lon <lon>`
 
 ## Architecture
 
@@ -39,7 +40,7 @@ Three TypeScript roots share one contract:
 
 Two separate user workflows:
 
-1. **Historical trend analysis** — `interpretQuery` (Genkit/Gemini parses intent; geocoding via Open-Meteo in `providers/locations.ts`; Gemini never supplies coordinates or numbers) → `createAnalysis` (idempotent on `requestId`; atomically reserves quota and writes `analyses/{id}` + `analysisJobs/{id}`) → `processAnalysis` Firestore trigger (lease-fenced worker, retries) → `AnalysisService` (`analysis.ts`) fetches Meteomatics daily aggregates (`providers/meteomatics.ts`), builds complete monthly/annual series, runs OLS + Newey–West in `statistics.ts`, writes the result. `ai.ts` `explainResults` may append prose from qualitative categories only, with a deterministic template fallback.
+1. **Historical trend analysis** — `interpretQuery` (Genkit/Gemini parses intent; geocoding via Open-Meteo in `providers/locations.ts`; Gemini never supplies coordinates or numbers) → `createAnalysis` (idempotent on `requestId`; atomically reserves quota and writes `analyses/{id}` + `analysisJobs/{id}`) → `processAnalysis` Firestore trigger (lease-fenced worker, retries) → `AnalysisService` (`analysis.ts`) fetches Meteomatics daily aggregates (`providers/meteomatics.ts`) or, when `spec.dataSource === 'giovanni'`, NASA Giovanni MERRA-2 monthly means (`providers/giovanni.ts`), builds complete monthly/annual series, runs OLS + Newey–West in `statistics.ts`, writes the result. `ai.ts` `explainResults` may append prose from qualitative categories only, with a deterministic template fallback.
 2. **Meteomatics REST chat** — `getMeteomaticsCatalog` / `interpretMeteomatics` → `checkMeteomaticsAvailability` → `executeMeteomaticsQuery` (requires `confirmed: true`) via `providers/meteomatics-query.ts`. Results stay raw provider values with provenance and are never fed into trend analysis. Chat sessions persist through the session callables (`sessions.ts`).
 
 Current weather (`providers/current-weather.ts`) is a third independent provider path and is never mixed into historical series.

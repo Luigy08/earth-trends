@@ -19,6 +19,7 @@ export const analysisSpecSchema = z.object({
   endYear: year,
   comparisonMode: z.enum(['none', 'locations', 'periods']),
   secondPeriod: periodSchema.optional(),
+  dataSource: z.enum(['meteomatics', 'giovanni']).optional(),
 }).strict().superRefine((spec, ctx) => {
   if (spec.endYear < spec.startYear) {
     ctx.addIssue({ code: 'custom', message: 'The period must be in chronological order', path: ['endYear'] });

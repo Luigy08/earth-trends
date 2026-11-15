@@ -1,14 +1,16 @@
 import { genkit, z } from 'genkit';
 import { vertexAI } from '@genkit-ai/google-genai';
-import type { AnalysisResult, AnalysisSpec, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretQueryResponse, InterpretMeteomaticsResponse, MeteomaticsQuerySpec } from '../../shared/types';
+import type { AnalysisResult, AnalysisSpec, EarthdataCatalogResponse, EarthdataQuerySpec, GiovanniQuerySpec, InterpretEarthdataResponse, InterpretGiovanniResponse, InterpretQueryResponse, InterpretMeteomaticsResponse, MeteomaticsQuerySpec } from '../../shared/types';
 import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { GIOVANNI_ASSISTANT_PROMPT } from './giovanni-assistant.constant';
+import { EARTHDATA_ASSISTANT_PROMPT } from './earthdata-assistant.constant';
+import type { EarthdataZone } from '../../shared/earthdata.types';
 import type { ParsedIntent } from './backend.types';
 import { CONFIG } from './config.constant';
 import { analysisSpecSchema } from './validation';
 import type { LocationSearch } from './providers/locations';
 import { METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
-import { giovanniQuerySchema, meteomaticsQuerySchema } from './validation';
+import { earthdataQuerySchema, giovanniQuerySchema, meteomaticsQuerySchema } from './validation';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { METEOMATICS_ASSISTANT_PROMPT } from './meteomatics-assistant.constant';
 
@@ -253,5 +255,58 @@ export async function interpretGiovanniQuery(query: string, locations: LocationS
     clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
   }
   if (!clarificationQuestions.length) clarificationQuestions.push('Tell me which variable, which place and which dates you want to explore.');
+  return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...withLabel };
+}
+
+const earthdataIntentSchema = z.object({
+  ready: z.boolean(), variables: z.array(z.string()), zones: z.array(z.string()), locationQueries: z.array(z.string()),
+  startDate: z.string().nullable(), endDate: z.string().nullable(),
+  summary: z.string(), clarificationQuestions: z.array(z.string()), suggestions: z.array(z.string()),
+});
+
+/**
+ * Gemini proposes a NASA Earthdata request against the stored catalog. The server keeps only catalog variables
+ * and zones, geocodes named places and finds their zone itself, and validates the result. No values are generated.
+ */
+export async function interpretEarthdataQuery(query: string, locations: LocationSearch, catalog: EarthdataCatalogResponse,
+  zoneAt: (latitude: number, longitude: number) => Promise<EarthdataZone | undefined>): Promise<InterpretEarthdataResponse> {
+  const variables = catalog.variables.map(item => `${item.id}: ${item.description} (${item.temporalResolution}, ${item.unit}, from ${item.since ?? 'product start'}; ${item.stored ? `stored ${item.stored.firstDate} to ${item.stored.lastDate}` : 'not ingested yet'})`).join('\n');
+  const zones = catalog.zones.map(item => `${item.id}: ${item.name}`).join('\n');
+  const response = await getAi().generate({
+    model: vertexAI.model(CONFIG.geminiModel), config: { temperature: 0, maxOutputTokens: 2048 },
+    output: { schema: earthdataIntentSchema },
+    system: `${EARTHDATA_ASSISTANT_PROMPT}\nToday: ${new Date().toISOString().slice(0, 10)}\nCatalog:\n${variables}\nZones (departments of Honduras):\n${zones}`,
+    prompt: JSON.stringify({ query }),
+  });
+  const value = response.output;
+  if (!value) throw new Error('The model did not return a valid Earthdata request.');
+  const clarificationQuestions = value.clarificationQuestions.slice(0, 6).map(question => question.slice(0, 300));
+  const metadata = { suggestions: value.suggestions.slice(0, 3).map(item => item.slice(0, 300)) };
+  const selected = new Map<string, EarthdataZone>();
+  for (const id of value.zones) {
+    const zone = catalog.zones.find(item => item.id === id);
+    if (zone) selected.set(zone.id, zone);
+  }
+  for (const place of value.locationQueries.slice(0, 4)) {
+    const matches = await locations.search(place, 3);
+    if (matches.length !== 1) {
+      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${place}. Could you name the department instead?`);
+      continue;
+    }
+    const match = matches[0]!;
+    const zone = await zoneAt(match.latitude, match.longitude);
+    if (zone) selected.set(zone.id, zone);
+    else clarificationQuestions.push(`${match.name}${match.country ? `, ${match.country}` : ''} is outside the departments with stored data. Which department of Honduras would you like instead?`);
+  }
+  const chosen = [...selected.values()];
+  const withLabel = { ...metadata, ...(chosen.length ? { locationLabel: chosen.map(zone => zone.name).join(', ') } : {}) };
+  if (clarificationQuestions.length === 0 && value.variables.length && chosen.length && value.startDate && value.endDate) {
+    const known = value.variables.filter(id => catalog.variables.some(item => item.id === id));
+    const parsed = earthdataQuerySchema.safeParse({ variables: known, zones: chosen.map(zone => zone.id), startDate: value.startDate, endDate: value.endDate });
+    if (parsed.success && known.length === value.variables.length) return { status: 'ready', spec: parsed.data as EarthdataQuerySpec, summary: value.summary, clarificationQuestions: [], ...withLabel };
+    if (!parsed.success) clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
+    else clarificationQuestions.push('One of the variables is not in the stored catalog. Which of the available variables would you like?');
+  }
+  if (!clarificationQuestions.length) clarificationQuestions.push('Tell me which variable, which department and which dates you want to explore.');
   return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...withLabel };
 }

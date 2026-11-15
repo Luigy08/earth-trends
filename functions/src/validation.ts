@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { isMeteomaticsParameter } from '../../shared/meteomatics-parameter.resolver';
 import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
+import { EARTHDATA_LIMITS } from '../../shared/earthdata-catalog.constant';
 
 export const locationSchema = z.object({
   id: z.string().trim().min(1).max(120),
@@ -109,7 +110,24 @@ export const giovanniQuerySchema = z.object({
 });
 export const giovanniExecuteSchema = z.object({ spec: giovanniQuerySchema, confirmed: z.literal(true) }).strict();
 export const interpretGiovanniSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();
-export const saveQuerySessionSchema = z.object({ sessionId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/), workflow: z.enum(['meteomatics', 'giovanni']).default('meteomatics') }).strip();
+export const saveQuerySessionSchema = z.object({ sessionId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/), workflow: z.enum(['meteomatics', 'giovanni', 'earthdata']).default('meteomatics') }).strip();
+
+const earthdataId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+/** Variables and zones are checked against the stored catalog when the query runs; this validates shape and period. */
+export const earthdataQuerySchema = z.object({
+  variables: z.array(earthdataId).min(1).max(EARTHDATA_LIMITS.maxVariables),
+  zones: z.array(earthdataId).min(1).max(EARTHDATA_LIMITS.maxZones),
+  startDate: giovanniDate,
+  endDate: giovanniDate,
+}).strict().superRefine((spec, ctx) => {
+  if (new Set(spec.variables).size !== spec.variables.length) ctx.addIssue({ code: 'custom', message: 'Variables must be distinct.', path: ['variables'] });
+  if (new Set(spec.zones).size !== spec.zones.length) ctx.addIssue({ code: 'custom', message: 'Departments must be distinct.', path: ['zones'] });
+  if (spec.endDate < spec.startDate) ctx.addIssue({ code: 'custom', message: 'The end date must be on or after the start date.', path: ['endDate'] });
+  if (spec.endDate > new Date().toISOString().slice(0, 10)) ctx.addIssue({ code: 'custom', message: 'Stored data are historical; choose an end date up to today.', path: ['endDate'] });
+  if (Number(spec.startDate.slice(0, 4)) < EARTHDATA_LIMITS.firstYear) ctx.addIssue({ code: 'custom', message: `The stored satellite series start in ${EARTHDATA_LIMITS.firstYear}.`, path: ['startDate'] });
+});
+export const earthdataExecuteSchema = z.object({ spec: earthdataQuerySchema, confirmed: z.literal(true) }).strict();
+export const interpretEarthdataSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();
 
 export function parseInput<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, value: unknown): T {
   if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > 20_000) throw new HttpsError('invalid-argument', 'La solicitud supera los 20 KB.');

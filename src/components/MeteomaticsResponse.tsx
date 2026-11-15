@@ -10,7 +10,7 @@ function displayValue(value: number | string | null): string {
   return typeof value === 'number' ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value) : value;
 }
 
-/** Renders Meteomatics results and Giovanni results (which use the same JSON envelope). */
+/** Renders Meteomatics results, and Giovanni and Earthdata results (which use the same JSON envelope). */
 export function MeteomaticsResponse({ result }: { result: QueryExecuteResponse }) {
   const [showRaw, setShowRaw] = useState(false);
   const normalized = result.responseFormat === 'json' ? resolveMeteomaticsResult(result.result) : null;

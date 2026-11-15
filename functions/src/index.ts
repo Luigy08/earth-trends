@@ -6,6 +6,7 @@ import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import type { EarthdataCatalogResponse, EarthdataExecuteResponse, EarthdataQuerySpec, InterpretEarthdataResponse } from '../../shared/types';
 import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteResponse, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretMeteomaticsResponse, QueryExecuteResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
 import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { CONFIG } from './config.constant';
@@ -20,13 +21,18 @@ import { GiovanniQueryProvider } from './providers/giovanni-query';
 import { resolveGiovanniChart } from './giovanni-chart.resolver';
 import { GIOVANNI_CATALOG_SOURCE, GIOVANNI_CATALOG_VERSION, GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { LocationSearch } from './providers/locations';
-import { explainResults, interpretGiovanniQuery, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
+import { explainResults, interpretEarthdataQuery, interpretGiovanniQuery, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
 import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
-import { balamApiOptions, balamBackfillOptions, balamIngestOptions, handleBalamApi, runBalamBackfill, runBalamIngest } from './balam/balam.functions';
+import { balamApiOptions, balamBackfillOptions, balamIngestOptions, getIngest as getBalamIngest, getRepository as getBalamRepository, handleBalamApi, runBalamBackfill, runBalamIngest } from './balam/balam.functions';
+import { balamDatabaseSecrets, balamSecrets } from './balam/balam.constant';
+import { INGEST_TARGETS } from './ingest/targets.constant';
+import { EarthdataQueryProvider, EarthdataRequestError } from './providers/earthdata-query';
+import { resolveEarthdataChart } from './earthdata-chart.resolver';
+import { earthdataExecuteSchema, interpretEarthdataSchema } from './validation';
 import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, giovanniExecuteSchema, interpretGiovanniSchema, interpretMeteomaticsSchema, interpretQuerySchema, saveQuerySessionSchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
@@ -42,6 +48,10 @@ const giovanniQueries = new GiovanniQueryProvider(cache);
 const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 120, memory: '512MiB' as const };
 const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
 const giovanniCallableOptions = { ...callableOptions, secrets: giovanniSecrets };
+// The Earthdata workflow reads the Balam store. Only running a query can ask NASA for missing data, so only it binds the provider secrets.
+const earthdataQueries = new EarthdataQueryProvider(getBalamRepository, INGEST_TARGETS, variableIds => getBalamIngest().plan({ variableIds, backfill: true }));
+const earthdataCallableOptions = { ...callableOptions, secrets: balamDatabaseSecrets };
+const earthdataExecuteOptions = { ...callableOptions, secrets: balamSecrets };
 
 function requireOwner(request: CallableRequest<unknown>): string {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to continue.');
@@ -71,10 +81,11 @@ export const getMeteomaticsSession = onCall(callableOptions, async request => {
   await sessions.get(ownerId, input.sessionId);
   const snapshot = await db.collection('sessions').doc(input.sessionId).collection('meteoState').orderBy('index').get();
   if (snapshot.empty) return { state: null };
-  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState | import('../../shared/types').GiovanniSessionState;
-  // Session state holds Meteomatics or Giovanni results; chart trends are recomputed on read.
+  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState | import('../../shared/types').GiovanniSessionState | import('../../shared/types').EarthdataSessionState;
+  // Session state holds Meteomatics, Giovanni or Earthdata results; chart trends are recomputed on read.
   if (Array.isArray(state.results)) state.results = (state.results as QueryExecuteResponse[]).map(result => result.provider === 'NASA Giovanni'
     ? { ...result, chartTrends: resolveGiovanniChart(result.result, result.request) }
+    : result.provider === 'NASA AppEEARS' ? { ...result, chartTrends: resolveEarthdataChart(result.result, result.request) }
     : { ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }) as typeof state.results;
   return { state };
 });
@@ -235,6 +246,37 @@ export const executeGiovanniQuery = onCall(giovanniCallableOptions, async (reque
     logger.warn('Giovanni query failed', { kind: error instanceof SourceError ? error.provider : error instanceof Error ? error.name : 'unknown' });
     throw new HttpsError('unavailable', 'NASA Giovanni is unavailable or did not return data for this variable, place and period. Check the Earthdata credentials and try again.');
   }
+});
+
+function earthdataError(error: unknown, context: string): HttpsError {
+  if (error instanceof EarthdataRequestError) return new HttpsError(error.code, error.message);
+  logger.warn(context, { kind: error instanceof Error ? error.name : 'unknown', message: error instanceof Error ? error.message.slice(0, 300) : '' });
+  return new HttpsError('unavailable', 'The NASA Earthdata store is unavailable. Please try again later.');
+}
+
+export const getEarthdataCatalog = onCall(earthdataCallableOptions, async (request): Promise<EarthdataCatalogResponse> => {
+  requireOwner(request);
+  try { return await earthdataQueries.catalog(); }
+  catch (error) { throw earthdataError(error, 'Earthdata catalog failed'); }
+});
+
+export const interpretEarthdata = onCall(earthdataCallableOptions, async (request): Promise<InterpretEarthdataResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(interpretEarthdataSchema, request.data);
+  await consumeQuota(db, ownerId, 'interpretQuery');
+  try { return await interpretEarthdataQuery(input.query, locations, await earthdataQueries.catalog(), (latitude, longitude) => earthdataQueries.zoneAt(latitude, longitude)); }
+  catch (error) {
+    logger.warn('Earthdata request interpretation failed', { kind: error instanceof Error ? error.name : 'unknown' });
+    throw new HttpsError('unavailable', 'The NASA Earthdata assistant is unavailable. Try again later.');
+  }
+});
+
+export const executeEarthdataQuery = onCall(earthdataExecuteOptions, async (request): Promise<EarthdataExecuteResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(earthdataExecuteSchema, request.data);
+  await consumeQuota(db, ownerId, 'earthdataExecute');
+  try { return await earthdataQueries.execute(input.spec as EarthdataQuerySpec); }
+  catch (error) { throw earthdataError(error, 'Earthdata query failed'); }
 });
 
 export const createAnalysis = onCall(callableOptions, async request => {

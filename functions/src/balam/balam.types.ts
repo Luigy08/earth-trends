@@ -30,6 +30,8 @@ export interface BalamReadRepository {
   series(filter: SeriesFilter): Promise<ObservationRow[]>;
   trends(filter: { variableId: string; zoneIds?: string[]; source?: string }): Promise<StoredTrend[]>;
   coverage(): Promise<StoredCoverage[]>;
+  /** Variables and sources with a request still being processed by the provider. */
+  activeIngestions(): Promise<{ variableId: string; source: string }[]>;
 }
 
 export interface ApiRequest {

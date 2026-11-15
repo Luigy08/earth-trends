@@ -18,7 +18,7 @@ export async function reserveQuota(db: Firestore, transaction: Transaction, owne
     ? 'You have reached the hourly analysis limit. Try again next hour.' : 'The application’s daily request limit has been reached. Please try again after 00:00 UTC.');
   const globalCount = Number(docs[1]?.data()?.[action] ?? 0);
   const globalLimit = action === 'createAnalysis' ? CONFIG.globalDailyQuota
-    : action === 'interpretQuery' || action === 'meteomaticsSuggestions' ? CONFIG.globalInterpretDailyQuota : action === 'meteomaticsExecute' || action === 'giovanniExecute' ? CONFIG.globalDailyQuota : CONFIG.globalSearchDailyQuota;
+    : action === 'interpretQuery' || action === 'meteomaticsSuggestions' ? CONFIG.globalInterpretDailyQuota : action === 'meteomaticsExecute' || action === 'giovanniExecute' || action === 'earthdataExecute' ? CONFIG.globalDailyQuota : CONFIG.globalSearchDailyQuota;
   if (action !== 'getAnalysis' && globalCount >= globalLimit) {
     throw new HttpsError('resource-exhausted', 'The service has reached its daily capacity. Try again tomorrow.');
   }

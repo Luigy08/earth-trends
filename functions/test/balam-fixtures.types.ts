@@ -91,6 +91,9 @@ export class MemoryBalamRepository implements IngestRepository, BalamReadReposit
       .filter((t) => t.variableId === filter.variableId && (!filter.zoneIds || filter.zoneIds.includes(t.zoneId)) && (!filter.source || t.source === filter.source))
       .map((t) => ({ ...t, updatedAt: '2026-11-15T00:00:00.000Z' }));
   }
+  async activeIngestions() {
+    return this.jobs.filter((j) => j.status === 'pending' || j.status === 'processing').map(({ variableId, source }) => ({ variableId, source }));
+  }
   async coverage(): Promise<StoredCoverage[]> {
     const groups = new Map<string, StoredCoverage>();
     for (const t of this.trendRecords.values()) {

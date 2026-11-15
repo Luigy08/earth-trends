@@ -55,7 +55,7 @@ export interface ConversationSession {
   createdAt: string;
   updatedAt: string;
   analysisId?: string;
-  workflow?: 'meteomatics' | 'giovanni' | 'trend';
+  workflow?: 'meteomatics' | 'giovanni' | 'earthdata' | 'trend';
 }
 export interface ListSessionsResponse { sessions: ConversationSession[] }
 export interface SessionRequest { sessionId: string }
@@ -124,7 +124,7 @@ export interface DataQuality {
   warnings: string[];
 }
 export interface DataProvenance {
-  provider: HistoricalProviderName | 'Open-Meteo';
+  provider: HistoricalProviderName | 'Open-Meteo' | 'NASA AppEEARS';
   dataset: string;
   parameters: string[];
   sourceUrl: string;
@@ -218,7 +218,7 @@ export interface InterpretGiovanniResponse { status: 'ready' | 'needs_clarificat
 export interface GiovanniExecuteRequest { spec: GiovanniQuerySpec; confirmed: true }
 /** `result` uses the Meteomatics JSON envelope ({ data: [{ parameter: "<id>:<unit>", coordinates: [{ lat, lon, dates }] }] }) with raw provider values. */
 export interface GiovanniExecuteResponse { provider: 'NASA Giovanni'; source: 'giovanni'; requestedAt: string; request: GiovanniQuerySpec; responseFormat: 'json'; result: unknown; provenance: DataProvenance; chartTrends?: MeteomaticsChartTrend[] }
-export type QueryExecuteResponse = MeteomaticsExecuteResponse | GiovanniExecuteResponse;
+export type QueryExecuteResponse = MeteomaticsExecuteResponse | GiovanniExecuteResponse | EarthdataExecuteResponse;
 export interface GiovanniSessionState {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   proposal: GiovanniQuerySpec | null;
@@ -228,4 +228,32 @@ export interface GiovanniSessionState {
   locationLabel: string;
   selectedParameters: string[];
 }
-export type QuerySessionWorkflow = 'meteomatics' | 'giovanni';
+export type QuerySessionWorkflow = 'meteomatics' | 'giovanni' | 'earthdata';
+
+/** NASA Earthdata request (chat workflow): stored AppEEARS zonal series. Dates are calendar days, YYYY-MM-DD. */
+export interface EarthdataQuerySpec {
+  /** Canonical variable ids from the Earthdata catalog. */
+  variables: string[];
+  /** Zone ids from the Earthdata catalog, e.g. "HN-FM". */
+  zones: string[];
+  startDate: string;
+  endDate: string;
+}
+export interface EarthdataCatalogResponse { provider: string; sourceUrl: string; variables: import('./earthdata.types').EarthdataVariable[]; zones: import('./earthdata.types').EarthdataZone[] }
+export interface InterpretEarthdataRequest { query: string }
+export interface InterpretEarthdataResponse { status: 'ready' | 'needs_clarification'; spec?: EarthdataQuerySpec; summary: string; clarificationQuestions: string[]; suggestions?: string[]; locationLabel?: string }
+export interface EarthdataExecuteRequest { spec: EarthdataQuerySpec; confirmed: true }
+/** `result` uses the Meteomatics JSON envelope; each entry is one variable in one zone, labeled "<variable> · <zone>:<unit>". */
+export interface EarthdataExecuteResponse { provider: 'NASA AppEEARS'; source: 'earthdata'; requestedAt: string; request: EarthdataQuerySpec; responseFormat: 'json'; result: unknown; provenance: DataProvenance; chartTrends?: MeteomaticsChartTrend[];
+  /** What the reader must know about this result: a series that stops early and what was requested from NASA to complete it. */
+  notices?: string[] }
+export interface EarthdataSessionState {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  proposal: EarthdataQuerySpec | null;
+  results: EarthdataExecuteResponse[];
+  suggestions: string[];
+  summary: string;
+  locationLabel: string;
+  selectedParameters: string[];
+  selectedZones: string[];
+}

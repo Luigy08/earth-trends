@@ -35,7 +35,7 @@ let repository: PrismaBalamRepository | undefined;
 let registry: DataSourceRegistry | undefined;
 let ingest: IngestService | undefined;
 
-function getRepository(): PrismaBalamRepository {
+export function getRepository(): PrismaBalamRepository {
   repository ??= new PrismaBalamRepository(getPrisma(databaseUrl(), BALAM.poolMax));
   return repository;
 }
@@ -48,7 +48,7 @@ function getRegistry(): DataSourceRegistry {
   return registry;
 }
 
-function getIngest(): IngestService {
+export function getIngest(): IngestService {
   ingest ??= new IngestService(getRepository(), getRegistry());
   return ingest;
 }

@@ -12,7 +12,7 @@ export type SpeechWindow = Window & { SpeechRecognition?: new () => SpeechRecogn
 
 export type ChartView = 'annual' | 'monthly' | 'anomaly';
 export type NavigationPage = 'explore' | 'analyses' | 'realtime';
-export type QueryWorkflow = 'trend' | 'meteomatics' | 'giovanni';
+export type QueryWorkflow = 'trend' | 'meteomatics' | 'giovanni' | 'earthdata';
 export type QueryMode = 'question' | 'form';
 export type AnalysisDraft = Omit<AnalysisSpec, 'locations'> & { locations: (Location | null)[] };
 export type ChartRow = { label: string; [key: string]: string | number | null };

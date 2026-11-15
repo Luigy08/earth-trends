@@ -38,6 +38,7 @@ export const CONFIG = {
     meteomaticsAvailability: positiveInteger('QUOTA_METEOMATICS_AVAILABILITY', 30),
     meteomaticsExecute: positiveInteger('QUOTA_METEOMATICS_EXECUTE', 20),
     giovanniExecute: positiveInteger('QUOTA_GIOVANNI_EXECUTE', 20),
+    earthdataExecute: positiveInteger('QUOTA_EARTHDATA_EXECUTE', 60),
   },
 } as const;
 

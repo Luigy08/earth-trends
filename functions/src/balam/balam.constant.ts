@@ -1,16 +1,16 @@
 import { defineSecret } from 'firebase-functions/params';
 import { CONFIG } from '../config.constant';
+import { earthdataPassword, earthdataUsername, giovanniSecrets } from '../providers/giovanni';
 import { meteomaticsPassword, meteomaticsUsername, processingSecrets } from '../providers/meteomatics';
 
 // Same pattern as the Meteomatics credentials: Secret Manager in production, ignored local env files in the emulator.
 const databaseUrlSecret = CONFIG.useSecretManager ? defineSecret('DATABASE_URL') : undefined;
-const earthdataUserSecret = CONFIG.useSecretManager ? defineSecret('EARTHDATA_USER') : undefined;
-const earthdataPassSecret = CONFIG.useSecretManager ? defineSecret('EARTHDATA_PASS') : undefined;
 
-export const balamSecrets = [
-  ...(databaseUrlSecret && earthdataUserSecret && earthdataPassSecret ? [databaseUrlSecret, earthdataUserSecret, earthdataPassSecret] : []),
-  ...processingSecrets,
-];
+/** For functions that only read the Balam store. */
+export const balamDatabaseSecrets = databaseUrlSecret ? [databaseUrlSecret] : [];
+
+// AppEEARS signs in with the same NASA Earthdata Login account as Giovanni, so both share its secrets.
+export const balamSecrets = [...(databaseUrlSecret ? [databaseUrlSecret] : []), ...giovanniSecrets, ...processingSecrets];
 
 /** Pooled connection string. Only call inside a function invocation: secrets are not readable at load time. */
 export function databaseUrl(): string | undefined {
@@ -19,8 +19,8 @@ export function databaseUrl(): string | undefined {
 
 export function earthdataCredentials(): { username: string; password: string } {
   return {
-    username: (CONFIG.useSecretManager ? earthdataUserSecret?.value() : process.env.EARTHDATA_USER) ?? '',
-    password: (CONFIG.useSecretManager ? earthdataPassSecret?.value() : process.env.EARTHDATA_PASS) ?? '',
+    username: (CONFIG.useSecretManager ? earthdataUsername?.value() : process.env.EARTHDATA_USERNAME) ?? '',
+    password: (CONFIG.useSecretManager ? earthdataPassword?.value() : process.env.EARTHDATA_PASSWORD) ?? '',
   };
 }
 
@@ -41,8 +41,12 @@ function corsOrigins(): string[] {
 export const BALAM = {
   /** Browsers may only call the API from the frontend. CORS is not access control: /query also requires sign-in. */
   corsOrigins: corsOrigins(),
-  /** 00:15 in Honduras: the trailing 24 h of hourly data then cover the previous local day. */
-  schedule: process.env.BALAM_INGEST_SCHEDULE || '15 0 * * *',
+  /**
+   * Hourly, so a request NASA has finished is stored within the hour and the next block goes out right away.
+   * Planning stays idempotent: nothing is requested twice. The 23:15 run in Honduras stores the Meteomatics
+   * daily mean for the whole local day (00:00–23:00).
+   */
+  schedule: process.env.BALAM_INGEST_SCHEDULE || '15 * * * *',
   timeZone: 'America/Tegucigalpa',
   /** Connections per function instance. */
   poolMax: 2,

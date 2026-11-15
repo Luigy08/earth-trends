@@ -5,7 +5,7 @@ Multi-source layer for Earth Trend Detective. It keeps the Meteomatics query mod
 It runs beside the existing callables and never feeds them: the on-demand analysis (`createAnalysis` / `processAnalysis`) and the Meteomatics chat are unchanged, and values from different providers are never spliced into one series.
 
 ```
-balamIngest (daily, 00:15 America/Tegucigalpa)
+balamIngest (hourly, at :15)
   process()  poll requests in flight → Observation rows → Trend per zone
   plan()     submit the next missing range of every target
                     │
@@ -63,7 +63,7 @@ Local values go in the ignored `functions/.env.local` (see `.env.example`); prod
 |---|---|
 | `DATABASE_URL` | **Pooled** PostgreSQL URL, used at runtime (with Prisma Postgres: the `pooled.db.prisma.io` host, not `prisma+postgres://accelerate…`) |
 | `DIRECT_URL` | Direct URL, only for `prisma migrate` and `seed:zones`; never deployed |
-| `EARTHDATA_USER`, `EARTHDATA_PASS` | NASA Earthdata Login, for AppEEARS |
+| `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD` | NASA Earthdata Login, shared with the Giovanni source. AppEEARS needs the username and password; `EARTHDATA_TOKEN` alone is not enough |
 | `METEOMATICS_USERNAME`, `METEOMATICS_PASSWORD` | The existing Meteomatics secrets, reused |
 
 ```bash
@@ -88,7 +88,8 @@ Targets are in `src/ingest/targets.constant.ts`: the 18 departments × land surf
 
 Conventions worth knowing:
 
-- `Observation.date` is the product date for AppEEARS. For Meteomatics it is the **local Honduran date on which the 24-hour window starts**: the free plan only serves the last 24 h, so each run averages the 24 hourly values ending at the current hour (run at 00:15 local, that is 01:00 → 00:00). `count` is then the number of hourly samples, and a day with fewer than 18 valid hours has a null value.
+- `balamIngest` runs every hour (`BALAM_INGEST_SCHEDULE`), so a block NASA has finished is stored within the hour and the next one is requested right away; a range requested in the last 20 hours is still never requested twice.
+- `Observation.date` is the product date for AppEEARS. For Meteomatics it is the **local Honduran date on which the 24-hour window starts**: the free plan only serves the last 24 h, so a run averages the 24 hourly values ending at the current hour. The 23:15 local run therefore stores the whole local day (00:00 → 23:00), and later runs skip a date that is already stored. `count` is then the number of hourly samples, and a day with fewer than 18 valid hours has a null value.
 - Sources that answer several samples per day are averaged into one daily row (`median`/`std` stay null). A single sample per day keeps the area statistics from AppEEARS (`min`, `max`, `median`, `std`, pixel `count`).
 - Missing values are stored as null and are never imputed.
 
@@ -109,6 +110,18 @@ Monthly means → annual means (calendar-day-weighted, only for years with 12 va
 
 The read routes are public and limited by CORS to the Hosting domains (`BALAM_CORS_ORIGINS` overrides the list). CORS is not access control, so `/query` also requires a Firebase ID token (`Authorization: Bearer …`, non-anonymous), App Check when `ENFORCE_APP_CHECK=true`, and consumes the existing `meteomaticsExecute` quota. A query is only visible to the user who submitted it. Errors are `{ "error": { "code", "message", "fields"? } }`.
 
+## NASA Earthdata chat (frontend)
+
+The "NASA Earthdata" query mode in the web app reads this store through three callables, following the Giovanni chat pattern (owner check → validation → quota → service):
+
+| Callable | Notes |
+|---|---|
+| `getEarthdataCatalog` | The AppEEARS targets as variables (with their stored coverage) and the zones |
+| `interpretEarthdata` | Gemini maps the question to catalog variables, zone ids and dates. Named places are geocoded and matched to a department polygon on the server; an ambiguous place becomes a question |
+| `executeEarthdataQuery` | Reads `Observation` (source `appeears`) and answers in the Meteomatics envelope, one entry per variable and zone labeled `<variable> · <zone>:<unit>` |
+
+A query never waits for NASA. When a requested variable is not stored, or its stored series ends more than 60 days before the requested end, `executeEarthdataQuery` asks the ingestion for every missing block of that variable (`plan({ backfill: true })`, idempotent) and says what it did: the request fails with an explicit message when nothing is stored, or returns the stored part with `notices` when the series is incomplete. The hourly `balamIngest` stores the blocks as NASA finishes them. Any signed-in user can start these requests; a variable already in progress is never requested twice. Limits are in `shared/earthdata-catalog.constant.ts` (3 variables, 4 departments, 60,000 values per request). Chart statistics come from `earthdata-chart.resolver.ts`: a month is the mean of its valid observations, years need 12 valid months, and the trend is OLS with Newey–West under the usual 10-year / 80 % thresholds. The Meteomatics-sourced air temperature is not offered here, because this mode is labeled as NASA data.
+
 ## Running the historical backfill
 
 `balamBackfill` is a callable that requires the custom claim `admin: true`. It runs `plan()` in backfill mode: **every** missing block is requested at once, and the daily `balamIngest` then stores them as they finish.
@@ -128,7 +141,7 @@ Prefer one variable at a time: all targets together mean about 30 AppEEARS area 
 ## Adding a source
 
 1. Implement `DataSource` (`submit` + `refresh`) in `sources/`, returning `ParameterSeries[]`. Handle the `zones` location (one series per zone, `id` = zone id) and report missing credentials or provider errors as an `error` job.
-2. Register it in `getRegistry()` (`src/balam/balam.functions.ts`). Its `id` becomes the parameter prefix. Add its secrets in `balam.constant.ts`.
+2. Register it in `getRegistry()` (`src/balam/balam.functions.ts`). Its `id` becomes the parameter prefix. Add its secrets in `balam.constant.ts`, reusing existing ones when the provider account is the same.
 3. Add its bindings to `catalog/canonical-variables.constant.ts`, after checking the dataset metadata (units, sign convention, temporal aggregation, fill values).
 4. To preload it, add a target in `ingest/targets.constant.ts`; `plan()`/`process()` need no changes.
 
@@ -138,14 +151,12 @@ Nothing here deploys by itself. With the database created and the secrets at han
 
 ```bash
 firebase functions:secrets:set DATABASE_URL --project earth-trend-detective      # pooled URL
-firebase functions:secrets:set EARTHDATA_USER --project earth-trend-detective
-firebase functions:secrets:set EARTHDATA_PASS --project earth-trend-detective
 npm --prefix functions run migrate:deploy                                        # with DIRECT_URL in functions/.env.local
 npm --prefix functions run seed:zones
 firebase deploy --only functions --project earth-trend-detective
 ```
 
-The three secrets must exist before any functions deploy, because the new functions bind them.
+`DATABASE_URL` must exist before any functions deploy, because the new functions bind it; the Earthdata and Meteomatics secrets are the ones the project already has.
 
 ## Still to validate with real credentials
 

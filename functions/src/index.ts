@@ -13,6 +13,7 @@ import { SessionRepository } from './sessions';
 import { AnalysisService } from './analysis';
 import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics';
 import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
+import { GiovanniProvider, giovanniSecrets } from './providers/giovanni';
 import { LocationSearch } from './providers/locations';
 import { explainResults, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
@@ -29,7 +30,7 @@ const cache = new FirestoreCache(db);
 const repository = new AnalysisRepository(db);
 const sessions = new SessionRepository(db);
 const locations = new LocationSearch(cache);
-const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache);
+const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache, { giovanni: new GiovanniProvider(cache) });
 const meteomaticsQueries = new MeteomaticsQueryProvider(cache);
 const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 120, memory: '512MiB' as const };
 const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
@@ -213,7 +214,7 @@ export const getAnalysis = onCall(callableOptions, async (request): Promise<GetA
 
 export const processAnalysis = onDocumentCreated({
   document: 'analysisJobs/{analysisId}', retry: true, timeoutSeconds: 540,
-  memory: '1GiB', concurrency: 2, secrets: processingSecrets,
+  memory: '1GiB', concurrency: 2, secrets: [...processingSecrets, ...giovanniSecrets],
 }, async event => {
   const analysisId = event.params.analysisId;
   const claim = await repository.claim(analysisId);

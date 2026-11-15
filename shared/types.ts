@@ -4,6 +4,9 @@ export type AnalysisStatus = 'queued' | 'processing' | 'completed' | 'insufficie
 export type ScientificOutcome = 'sufficient_data' | 'insufficient_data' | 'source_unavailable';
 export type ComparisonMode = 'none' | 'locations' | 'periods';
 export interface AnalysisPeriod { startYear: number; endYear: number }
+/** Historical series provider. Omitted means 'meteomatics'. One provider per analysis; never spliced. */
+export type HistoricalDataSource = 'meteomatics' | 'giovanni';
+export type HistoricalProviderName = 'Meteomatics' | 'NASA Giovanni';
 
 export interface Location {
   id: string;
@@ -20,6 +23,7 @@ export interface AnalysisSpec {
   endYear: number;
   comparisonMode: ComparisonMode;
   secondPeriod?: AnalysisPeriod;
+  dataSource?: HistoricalDataSource;
 }
 
 export interface InterpretQueryRequest { query: string }
@@ -120,7 +124,7 @@ export interface DataQuality {
   warnings: string[];
 }
 export interface DataProvenance {
-  provider: 'Meteomatics' | 'Open-Meteo';
+  provider: HistoricalProviderName | 'Open-Meteo';
   dataset: string;
   parameters: string[];
   sourceUrl: string;
@@ -147,7 +151,7 @@ export interface LocationAnalysis {
   trend: TrendStatistics | null;
   quality: DataQuality;
   baseline: { startYear: 1991; endYear: 2020; mean: number | null };
-  source: 'Meteomatics';
+  source: HistoricalProviderName;
   provenance: DataProvenance | null;
   currentWeather: CurrentWeather;
 }

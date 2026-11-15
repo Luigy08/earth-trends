@@ -6,7 +6,7 @@ import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
-import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
+import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteResponse, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretMeteomaticsResponse, QueryExecuteResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
 import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { CONFIG } from './config.constant';
 import { FirestoreCache } from './cache';
@@ -15,15 +15,19 @@ import { SessionRepository } from './sessions';
 import { AnalysisService } from './analysis';
 import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics';
 import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
+import { GiovanniProvider, giovanniSecrets } from './providers/giovanni';
+import { GiovanniQueryProvider } from './providers/giovanni-query';
+import { resolveGiovanniChart } from './giovanni-chart.resolver';
+import { GIOVANNI_CATALOG_SOURCE, GIOVANNI_CATALOG_VERSION, GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { LocationSearch } from './providers/locations';
-import { explainResults, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
+import { explainResults, interpretGiovanniQuery, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
 import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
 import { balamApiOptions, balamBackfillOptions, balamIngestOptions, handleBalamApi, runBalamBackfill, runBalamIngest } from './balam/balam.functions';
-import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, interpretMeteomaticsSchema, interpretQuerySchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
+import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, giovanniExecuteSchema, interpretGiovanniSchema, interpretMeteomaticsSchema, interpretQuerySchema, saveQuerySessionSchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
 setGlobalOptions({ region: CONFIG.region, maxInstances: CONFIG.maxInstances });
@@ -32,10 +36,12 @@ const cache = new FirestoreCache(db);
 const repository = new AnalysisRepository(db);
 const sessions = new SessionRepository(db);
 const locations = new LocationSearch(cache);
-const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache);
+const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache, { giovanni: new GiovanniProvider(cache) });
 const meteomaticsQueries = new MeteomaticsQueryProvider(cache);
+const giovanniQueries = new GiovanniQueryProvider(cache);
 const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 120, memory: '512MiB' as const };
 const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
+const giovanniCallableOptions = { ...callableOptions, secrets: giovanniSecrets };
 
 function requireOwner(request: CallableRequest<unknown>): string {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to continue.');
@@ -65,15 +71,18 @@ export const getMeteomaticsSession = onCall(callableOptions, async request => {
   await sessions.get(ownerId, input.sessionId);
   const snapshot = await db.collection('sessions').doc(input.sessionId).collection('meteoState').orderBy('index').get();
   if (snapshot.empty) return { state: null };
-  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState;
-  if (Array.isArray(state.results)) state.results = state.results.map(result => ({ ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }));
+  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState | import('../../shared/types').GiovanniSessionState;
+  // Session state holds Meteomatics or Giovanni results; chart trends are recomputed on read.
+  if (Array.isArray(state.results)) state.results = (state.results as QueryExecuteResponse[]).map(result => result.provider === 'NASA Giovanni'
+    ? { ...result, chartTrends: resolveGiovanniChart(result.result, result.request) }
+    : { ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }) as typeof state.results;
   return { state };
 });
 export const saveMeteomaticsSession = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);
   const sessionId = request.data?.sessionId;
   const state = request.data?.state;
-  const input = parseInput(sessionRequestSchema, { sessionId });
+  const input = parseInput(saveQuerySessionSchema, { sessionId, workflow: request.data?.workflow });
   const session = await sessions.get(ownerId, input.sessionId);
   if (!state || !Array.isArray(state.messages)) throw new HttpsError('invalid-argument', 'Invalid session data.');
   const serialized = JSON.stringify(state);
@@ -86,7 +95,7 @@ export const saveMeteomaticsSession = onCall(callableOptions, async request => {
   chunks.forEach((data, index) => batch.set(ref.collection('meteoState').doc(String(index).padStart(5, '0')), { index, data }));
   const first = state.messages.find((message: { role?: string; content?: string }) => message.role === 'user' && typeof message.content === 'string');
   const title = session.session.title === 'New climate question' && first ? first.content.slice(0, 64).trim() : session.session.title;
-  const updated = { ...session.session, title, workflow: 'meteomatics' as const, updatedAt: new Date().toISOString() };
+  const updated = { ...session.session, title, workflow: input.workflow, updatedAt: new Date().toISOString() };
   batch.update(ref, { title, workflow: updated.workflow, updatedAt: updated.updatedAt });
   await batch.commit();
   return { session: updated };
@@ -201,6 +210,33 @@ export const executeMeteomaticsQuery = onCall(meteomaticsCallableOptions, async 
   }
 });
 
+export const getGiovanniCatalog = onCall(callableOptions, async (request): Promise<GiovanniCatalogResponse> => {
+  requireOwner(request);
+  return { version: GIOVANNI_CATALOG_VERSION, sourceUrl: GIOVANNI_CATALOG_SOURCE, variables: [...GIOVANNI_VARIABLES] };
+});
+
+export const interpretGiovanni = onCall(callableOptions, async (request): Promise<InterpretGiovanniResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(interpretGiovanniSchema, request.data);
+  await consumeQuota(db, ownerId, 'interpretQuery');
+  try { return await interpretGiovanniQuery(input.query, locations); }
+  catch (error) {
+    logger.warn('Giovanni request interpretation failed', { kind: error instanceof Error ? error.name : 'unknown' });
+    throw new HttpsError('unavailable', 'The Giovanni assistant is unavailable. Try again later.');
+  }
+});
+
+export const executeGiovanniQuery = onCall(giovanniCallableOptions, async (request): Promise<GiovanniExecuteResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(giovanniExecuteSchema, request.data);
+  await consumeQuota(db, ownerId, 'giovanniExecute');
+  try { return await giovanniQueries.execute(input.spec as GiovanniQuerySpec); }
+  catch (error) {
+    logger.warn('Giovanni query failed', { kind: error instanceof SourceError ? error.provider : error instanceof Error ? error.name : 'unknown' });
+    throw new HttpsError('unavailable', 'NASA Giovanni is unavailable or did not return data for this variable, place and period. Check the Earthdata credentials and try again.');
+  }
+});
+
 export const createAnalysis = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(createAnalysisSchema, request.data);
@@ -216,7 +252,7 @@ export const getAnalysis = onCall(callableOptions, async (request): Promise<GetA
 
 export const processAnalysis = onDocumentCreated({
   document: 'analysisJobs/{analysisId}', retry: true, timeoutSeconds: 540,
-  memory: '1GiB', concurrency: 2, secrets: processingSecrets,
+  memory: '1GiB', concurrency: 2, secrets: [...processingSecrets, ...giovanniSecrets],
 }, async event => {
   const analysisId = event.params.analysisId;
   const claim = await repository.claim(analysisId);

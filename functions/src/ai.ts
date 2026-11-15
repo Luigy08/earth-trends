@@ -1,12 +1,14 @@
 import { genkit, z } from 'genkit';
 import { vertexAI } from '@genkit-ai/google-genai';
-import type { AnalysisResult, AnalysisSpec, InterpretQueryResponse, InterpretMeteomaticsResponse, MeteomaticsQuerySpec } from '../../shared/types';
+import type { AnalysisResult, AnalysisSpec, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretQueryResponse, InterpretMeteomaticsResponse, MeteomaticsQuerySpec } from '../../shared/types';
+import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
+import { GIOVANNI_ASSISTANT_PROMPT } from './giovanni-assistant.constant';
 import type { ParsedIntent } from './backend.types';
 import { CONFIG } from './config.constant';
 import { analysisSpecSchema } from './validation';
 import type { LocationSearch } from './providers/locations';
 import { METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
-import { meteomaticsQuerySchema } from './validation';
+import { giovanniQuerySchema, meteomaticsQuerySchema } from './validation';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { METEOMATICS_ASSISTANT_PROMPT } from './meteomatics-assistant.constant';
 
@@ -208,4 +210,48 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
   }
   if (!clarificationQuestions.length) clarificationQuestions.push('Provide a parameter, source, UTC date or date range, request mode, and the location details required for that mode.');
   return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...metadata };
+}
+
+const giovanniIntentSchema = z.object({
+  ready: z.boolean(), variables: z.array(z.string()), locationQuery: z.string().nullable(),
+  point: z.object({ latitude: z.number(), longitude: z.number() }).nullable(),
+  startDate: z.string().nullable(), endDate: z.string().nullable(),
+  summary: z.string(), clarificationQuestions: z.array(z.string()), suggestions: z.array(z.string()),
+});
+
+/** Gemini proposes a Giovanni request; the server geocodes places and validates it. No values are generated. */
+export async function interpretGiovanniQuery(query: string, locations: LocationSearch): Promise<InterpretGiovanniResponse> {
+  const catalog = GIOVANNI_VARIABLES.map(item => `${item.id}: ${item.description} (${item.temporalResolution}, ${item.unit}, from ${item.firstYear})`).join('\n');
+  const response = await getAi().generate({
+    model: vertexAI.model(CONFIG.geminiModel), config: { temperature: 0, maxOutputTokens: 2048 },
+    output: { schema: giovanniIntentSchema },
+    system: `${GIOVANNI_ASSISTANT_PROMPT}\nToday: ${new Date().toISOString().slice(0, 10)}\nCatalog:\n${catalog}`,
+    prompt: JSON.stringify({ query }),
+  });
+  const value = response.output;
+  if (!value) throw new Error('The model did not return a valid Giovanni request.');
+  const clarificationQuestions = value.clarificationQuestions.slice(0, 6).map(question => question.slice(0, 300));
+  const metadata = { suggestions: value.suggestions.slice(0, 3).map(item => item.slice(0, 300)) };
+  let locationLabel: string | undefined;
+  let point = value.point;
+  if (value.locationQuery) {
+    const matches = await locations.search(value.locationQuery, 3);
+    point = null;
+    if (matches.length === 1) {
+      const match = matches[0]!;
+      point = { latitude: match.latitude, longitude: match.longitude };
+      locationLabel = `${match.name}${match.country ? `, ${match.country}` : ''}`;
+    } else {
+      value.ready = false;
+      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${value.locationQuery}. Could you add the region or a nearby city?`);
+    }
+  }
+  const withLabel = { ...metadata, ...(locationLabel ? { locationLabel } : {}) };
+  if ((value.ready || clarificationQuestions.length === 0) && value.variables.length && point && value.startDate && value.endDate) {
+    const parsed = giovanniQuerySchema.safeParse({ variables: value.variables, point, startDate: value.startDate, endDate: value.endDate });
+    if (parsed.success) return { status: 'ready', spec: parsed.data as GiovanniQuerySpec, summary: value.summary, clarificationQuestions: [], ...withLabel };
+    clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
+  }
+  if (!clarificationQuestions.length) clarificationQuestions.push('Tell me which variable, which place and which dates you want to explore.');
+  return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...withLabel };
 }

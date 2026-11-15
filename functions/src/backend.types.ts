@@ -21,7 +21,7 @@ export interface AnalysisJob {
   leaseUntil?: number;
 }
 export interface StoredAnalysis extends Analysis { specHash: string }
-export type QuotaAction = 'interpretQuery' | 'meteomaticsSuggestions' | 'searchLocations' | 'createAnalysis' | 'getAnalysis' | 'createSession' | 'meteomaticsAvailability' | 'meteomaticsExecute';
+export type QuotaAction = 'interpretQuery' | 'meteomaticsSuggestions' | 'searchLocations' | 'createAnalysis' | 'getAnalysis' | 'createSession' | 'meteomaticsAvailability' | 'meteomaticsExecute' | 'giovanniExecute';
 export interface ParsedIntent {
   status: 'ready' | 'needs_clarification';
   metric?: ClimateMetric;

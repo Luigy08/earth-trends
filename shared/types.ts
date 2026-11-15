@@ -4,6 +4,9 @@ export type AnalysisStatus = 'queued' | 'processing' | 'completed' | 'insufficie
 export type ScientificOutcome = 'sufficient_data' | 'insufficient_data' | 'source_unavailable';
 export type ComparisonMode = 'none' | 'locations' | 'periods';
 export interface AnalysisPeriod { startYear: number; endYear: number }
+/** Historical series provider. Omitted means 'meteomatics'. One provider per analysis; never spliced. */
+export type HistoricalDataSource = 'meteomatics' | 'giovanni';
+export type HistoricalProviderName = 'Meteomatics' | 'NASA Giovanni';
 
 export interface Location {
   id: string;
@@ -20,6 +23,7 @@ export interface AnalysisSpec {
   endYear: number;
   comparisonMode: ComparisonMode;
   secondPeriod?: AnalysisPeriod;
+  dataSource?: HistoricalDataSource;
 }
 
 export interface InterpretQueryRequest { query: string }
@@ -51,7 +55,7 @@ export interface ConversationSession {
   createdAt: string;
   updatedAt: string;
   analysisId?: string;
-  workflow?: 'meteomatics' | 'trend';
+  workflow?: 'meteomatics' | 'giovanni' | 'trend';
 }
 export interface ListSessionsResponse { sessions: ConversationSession[] }
 export interface SessionRequest { sessionId: string }
@@ -120,7 +124,7 @@ export interface DataQuality {
   warnings: string[];
 }
 export interface DataProvenance {
-  provider: 'Meteomatics' | 'Open-Meteo';
+  provider: HistoricalProviderName | 'Open-Meteo';
   dataset: string;
   parameters: string[];
   sourceUrl: string;
@@ -147,7 +151,7 @@ export interface LocationAnalysis {
   trend: TrendStatistics | null;
   quality: DataQuality;
   baseline: { startYear: 1991; endYear: 2020; mean: number | null };
-  source: 'Meteomatics';
+  source: HistoricalProviderName;
   provenance: DataProvenance | null;
   currentWeather: CurrentWeather;
 }
@@ -200,3 +204,28 @@ export interface MeteomaticsChartTrend {
 }
 
 export interface MeteomaticsSuggestionsResponse { suggestions: string[] }
+
+/** NASA Giovanni point time-series request (chat workflow). Dates are UTC calendar days, YYYY-MM-DD. */
+export interface GiovanniQuerySpec {
+  variables: string[];
+  point: MeteomaticsCoordinate;
+  startDate: string;
+  endDate: string;
+}
+export interface GiovanniCatalogResponse { version: string; sourceUrl: string; variables: import('./giovanni.types').GiovanniVariable[] }
+export interface InterpretGiovanniRequest { query: string }
+export interface InterpretGiovanniResponse { status: 'ready' | 'needs_clarification'; spec?: GiovanniQuerySpec; summary: string; clarificationQuestions: string[]; suggestions?: string[]; locationLabel?: string }
+export interface GiovanniExecuteRequest { spec: GiovanniQuerySpec; confirmed: true }
+/** `result` uses the Meteomatics JSON envelope ({ data: [{ parameter: "<id>:<unit>", coordinates: [{ lat, lon, dates }] }] }) with raw provider values. */
+export interface GiovanniExecuteResponse { provider: 'NASA Giovanni'; source: 'giovanni'; requestedAt: string; request: GiovanniQuerySpec; responseFormat: 'json'; result: unknown; provenance: DataProvenance; chartTrends?: MeteomaticsChartTrend[] }
+export type QueryExecuteResponse = MeteomaticsExecuteResponse | GiovanniExecuteResponse;
+export interface GiovanniSessionState {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  proposal: GiovanniQuerySpec | null;
+  results: GiovanniExecuteResponse[];
+  suggestions: string[];
+  summary: string;
+  locationLabel: string;
+  selectedParameters: string[];
+}
+export type QuerySessionWorkflow = 'meteomatics' | 'giovanni';

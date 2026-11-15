@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { Button, MenuItem, TextField } from '@mui/material';
 import { CartesianGrid, Legend, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
-import type { MeteomaticsExecuteResponse } from '../../shared/types';
+import type { QueryExecuteResponse } from '../../shared/types';
 import { resolveMeteomaticsResult } from '../meteomatics-query.resolver';
 import { COLORS, FONTS } from '../theme.constant';
 
 const YEAR_MS = 31556952000;
 const formatNumber = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value);
 
-export function MeteomaticsChart({ result }: { result: MeteomaticsExecuteResponse }) {
+export function MeteomaticsChart({ result }: { result: QueryExecuteResponse }) {
   const [selected, setSelected] = useState('');
   const [view, setView] = useState('annual');
   const [showTrend, setShowTrend] = useState(true);
@@ -44,11 +44,11 @@ export function MeteomaticsChart({ result }: { result: MeteomaticsExecuteRespons
     if (!analysis?.monthly) return;
     const rows = ['year,month,value', ...analysis.monthly.map(point => `${point.year},${point.month},${point.value ?? ''}`)];
     const url = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = 'meteomatics-monthly.csv'; link.click(); URL.revokeObjectURL(url);
+    const link = document.createElement('a'); link.href = url; link.download = `${result.source === 'giovanni' ? 'giovanni' : 'meteomatics'}-monthly.csv`; link.click(); URL.revokeObjectURL(url);
   };
   const annualLine = aggregateAvailable && view === 'annual' && stats && showTrend && analysis!.annual.length ? [analysis!.annual[0]!, analysis!.annual[analysis!.annual.length - 1]!].map(point => ({ time: Date.UTC(point.year, 0, 1), value: stats.intercept + stats.slopePerYear * point.year })) : [];
   const trendPoints = showFit && fit ? [start, end].map(time => ({ time, value: fit.intercept + fit.slopePerYear * (time - fit.origin) / YEAR_MS })) : [];
-  return <section aria-label="Meteomatics time series chart" className="meteo-chart">
+  return <section aria-label={`${result.provider} time series chart`} className="meteo-chart">
     <h4>Change over time</h4>
     {series.length > 1 && <TextField select label="Variable and location" size="small" value={key} onChange={event => setSelected(event.target.value)} fullWidth>{series.map(([name]) => <MenuItem key={name} value={name}>{name}</MenuItem>)}</TextField>}
     {aggregateAvailable && <><TextField select label="Time resolution" size="small" value={view} onChange={event => setView(event.target.value)} sx={{ minWidth: 160, mt: 1 }}><MenuItem value="annual">Annual</MenuItem><MenuItem value="monthly">Monthly</MenuItem><MenuItem value="daily">Daily</MenuItem></TextField><label style={{ marginLeft: 12 }}><input type="checkbox" checked={showTrend} onChange={event => setShowTrend(event.target.checked)} /> Show trend</label></>}

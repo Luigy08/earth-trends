@@ -155,8 +155,7 @@ export const searchLocations = onCall(callableOptions, async (request): Promise<
 });
 
 export const getMeteomaticsSuggestions = onCall(callableOptions, async request => {
-  const ownerId = requireOwner(request);
-  await consumeQuota(db, ownerId, 'meteomaticsSuggestions');
+  requireOwner(request);
   try {
     const suggestions = await generateMeteomaticsSuggestions();
     return { suggestions };

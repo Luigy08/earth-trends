@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { HttpsError } from 'firebase-functions/v2/https';
 import { isMeteomaticsParameter } from '../../shared/meteomatics-parameter.resolver';
+import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 
 export const locationSchema = z.object({
   id: z.string().trim().min(1).max(120),
@@ -89,6 +90,26 @@ export const meteomaticsQuerySchema = z.object({
 export const meteomaticsAvailabilitySchema = z.object({ spec: meteomaticsQuerySchema }).strict();
 export const meteomaticsExecuteSchema = z.object({ spec: meteomaticsQuerySchema, confirmed: z.literal(true) }).strict();
 export const interpretMeteomaticsSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();
+
+const giovanniDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => Number.isFinite(Date.parse(`${value}T00:00:00Z`)), 'Use a valid YYYY-MM-DD date.');
+export const giovanniQuerySchema = z.object({
+  variables: z.array(z.string().max(120)).min(1).max(5),
+  point: coordinateSchema,
+  startDate: giovanniDate,
+  endDate: giovanniDate,
+}).strict().superRefine((spec, ctx) => {
+  const variables = spec.variables.map(id => GIOVANNI_VARIABLES.find(item => item.id === id));
+  if (variables.some(item => !item)) ctx.addIssue({ code: 'custom', message: 'Select variables from the Giovanni catalog.', path: ['variables'] });
+  if (new Set(spec.variables).size !== spec.variables.length) ctx.addIssue({ code: 'custom', message: 'Variables must be distinct.', path: ['variables'] });
+  if (spec.endDate < spec.startDate) ctx.addIssue({ code: 'custom', message: 'The end date must be on or after the start date.', path: ['endDate'] });
+  if (spec.endDate > new Date().toISOString().slice(0, 10)) ctx.addIssue({ code: 'custom', message: 'Giovanni serves past data only; choose an end date up to today.', path: ['endDate'] });
+  const firstYear = Math.max(...variables.map(item => item?.firstYear ?? 1980));
+  if (Number(spec.startDate.slice(0, 4)) < firstYear) ctx.addIssue({ code: 'custom', message: `The selected variables start in ${firstYear}.`, path: ['startDate'] });
+  if (Number(spec.endDate.slice(0, 4)) - Number(spec.startDate.slice(0, 4)) > 50) ctx.addIssue({ code: 'custom', message: 'Request at most 50 years at a time.', path: ['startDate'] });
+});
+export const giovanniExecuteSchema = z.object({ spec: giovanniQuerySchema, confirmed: z.literal(true) }).strict();
+export const interpretGiovanniSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();
+export const saveQuerySessionSchema = z.object({ sessionId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/), workflow: z.enum(['meteomatics', 'giovanni']).default('meteomatics') }).strip();
 
 export function parseInput<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, value: unknown): T {
   if (Buffer.byteLength(JSON.stringify(value ?? null), 'utf8') > 20_000) throw new HttpsError('invalid-argument', 'La solicitud supera los 20 KB.');

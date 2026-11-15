@@ -1,7 +1,7 @@
 import { FirebaseError, initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
-import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
+import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteRequest, GiovanniExecuteResponse, GiovanniSessionState, InterpretGiovanniRequest, InterpretGiovanniResponse, QuerySessionWorkflow, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
 import { ENV_KEYS } from '../app.constant';
 
 const env = import.meta.env;
@@ -69,8 +69,15 @@ export const interpretMeteomatics = (data: InterpretMeteomaticsRequest) => call<
 export const checkMeteomaticsAvailability = (data: MeteomaticsAvailabilityRequest) => call<MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse>('checkMeteomaticsAvailability', data);
 export const executeMeteomaticsQuery = (data: MeteomaticsExecuteRequest) => call<MeteomaticsExecuteRequest, MeteomaticsExecuteResponse>('executeMeteomaticsQuery', data);
 
-export const getMeteomaticsSession = (sessionId: string) => call<{ sessionId: string }, { state: import('../../shared/types').MeteomaticsSessionState | null }>('getMeteomaticsSession', { sessionId });
-export const saveMeteomaticsSession = (sessionId: string, state: import('../../shared/types').MeteomaticsSessionState) => call<{ sessionId: string; state: import('../../shared/types').MeteomaticsSessionState }, { session: ConversationSession }>('saveMeteomaticsSession', { sessionId, state });
+type QuerySessionState = import('../../shared/types').MeteomaticsSessionState | GiovanniSessionState;
+/** Query-chat session state (Meteomatics or Giovanni) shares one storage; `workflow` tags the session. */
+export const getMeteomaticsSession = (sessionId: string) => call<{ sessionId: string }, { state: QuerySessionState | null }>('getMeteomaticsSession', { sessionId });
+export const saveMeteomaticsSession = (sessionId: string, state: QuerySessionState, workflow: QuerySessionWorkflow = 'meteomatics') => call<{ sessionId: string; state: QuerySessionState; workflow: QuerySessionWorkflow }, { session: ConversationSession }>('saveMeteomaticsSession', { sessionId, state, workflow });
+
+let giovanniCatalogCache: Promise<GiovanniCatalogResponse> | undefined;
+export const getGiovanniCatalog = () => giovanniCatalogCache ??= call<Record<string, never>, GiovanniCatalogResponse>('getGiovanniCatalog', {}).catch(error => { giovanniCatalogCache = undefined; throw error; });
+export const interpretGiovanni = (data: InterpretGiovanniRequest) => call<InterpretGiovanniRequest, InterpretGiovanniResponse>('interpretGiovanni', data);
+export const executeGiovanniQuery = (data: GiovanniExecuteRequest) => call<GiovanniExecuteRequest, GiovanniExecuteResponse>('executeGiovanniQuery', data);
 
 export const getMeteomaticsSuggestions = (refresh = false) => {
   if (refresh) suggestionsCache = undefined;

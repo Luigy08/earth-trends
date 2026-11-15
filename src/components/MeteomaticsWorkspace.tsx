@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Autocomplete, Badge, Button, Chip, CircularProgress, Collapse, IconButton, MenuItem, Popover, TextField, Tooltip } from '@mui/material';
 import { CheckCircleOutline, ExpandMore, Refresh, TuneOutlined } from '@mui/icons-material';
 import type { MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec, MeteomaticsSessionState, ConversationSession } from '../../shared/types';
-import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestions, interpretMeteomatics, getMeteomaticsSession, saveMeteomaticsSession } from '../services/firebase';
+import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestions, interpretMeteomatics } from '../services/firebase';
+import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
 import { DictationButton } from './DictationButton';
@@ -24,11 +25,6 @@ const errorText = (cause: unknown) => {
 export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const saveQueue = useRef(Promise.resolve());
-  const pendingSave = useRef<(() => void) | null>(null);
-  const updatedCallback = useRef(onSessionUpdated);
-  updatedCallback.current = onSessionUpdated;
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
   const [suggestionsBusy, setSuggestionsBusy] = useState(false);
   const [catalog, setCatalog] = useState<MeteomaticsCatalogResponse | null>(null);
@@ -53,33 +49,14 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
     void getMeteomaticsCatalog().then(setCatalog).catch(cause => setCatalogError(errorText(cause))).finally(() => setCatalogBusy(false));
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    void getMeteomaticsSession(sessionId).then(({ state }) => {
-      if (!active) return;
-      if (state) {
-        setMessages(state.messages); setProposal(state.proposal); setResults(state.results ?? []);
-        setSuggestions(state.suggestions); setSummary(state.summary); setLocationLabel(state.locationLabel);
-        setSelectedParameters(state.selectedParameters ?? []);
-      }
-      setLoaded(true);
-    }).catch(cause => { if (active) setError(`Could not restore this session: ${errorText(cause)}`); });
-    return () => { active = false; };
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!loaded || messages.length === 0) return;
-    const state: MeteomaticsSessionState = { messages, proposal, results, suggestions, summary, locationLabel, selectedParameters };
-    const save = () => { pendingSave.current = null; saveQueue.current = saveQueue.current.catch(() => {}).then(async () => {
-        const { session } = await saveMeteomaticsSession(sessionId, state);
-        updatedCallback.current(session);
-      }).catch(cause => { setError(`Could not save this session: ${errorText(cause)}`); }); };
-    pendingSave.current = save;
-    const timer = window.setTimeout(save, 750);
-    return () => window.clearTimeout(timer);
-  }, [loaded, sessionId, messages, proposal, results, suggestions, summary, locationLabel, selectedParameters]);
-
-  useEffect(() => () => { pendingSave.current?.(); }, []);
+  const sessionState = useMemo<MeteomaticsSessionState | null>(() => messages.length === 0 ? null
+    : { messages, proposal, results, suggestions, summary, locationLabel, selectedParameters },
+  [messages, proposal, results, suggestions, summary, locationLabel, selectedParameters]);
+  const loaded = useQuerySession(sessionId, 'meteomatics', sessionState, state => {
+    setMessages(state.messages); setProposal(state.proposal); setResults(state.results ?? []);
+    setSuggestions(state.suggestions); setSummary(state.summary); setLocationLabel(state.locationLabel);
+    setSelectedParameters(state.selectedParameters ?? []);
+  }, onSessionUpdated, setError);
 
   const refreshSearchSuggestions = async (refresh = false) => {
     setSuggestionsBusy(true);

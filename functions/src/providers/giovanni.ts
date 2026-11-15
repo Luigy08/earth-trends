@@ -35,7 +35,8 @@ async function earthdataToken(): Promise<string> {
   }
 }
 
-async function fetchCsv(url: string): Promise<string> {
+/** Authenticated GET against the Giovanni time series service; failures are SourceError (source unavailable). */
+export async function fetchGiovanniCsv(url: string): Promise<string> {
   const token = await earthdataToken();
   try {
     const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(120_000) });
@@ -67,7 +68,7 @@ export class GiovanniProvider implements ClimateProvider {
     if (requestStart > endYear) throw new SourceError(PROVIDER);
     const params = new URLSearchParams({ data: variable.id, location: `[${location.latitude},${location.longitude}]`,
       time: `${requestStart}-01-01T00:00:00/${endYear}-12-31T23:59:59` });
-    const csv = parseGiovanniCsv(await fetchCsv(`${GIOVANNI_TIME_SERIES_URL}?${params}`));
+    const csv = parseGiovanniCsv(await fetchGiovanniCsv(`${GIOVANNI_TIME_SERIES_URL}?${params}`));
     const convert = resolveGiovanniConversion(GIOVANNI_UNIT_CONVERSIONS, metric, csv.headers.unit);
     // An empty response or an unverified unit is a source problem, never "no trend".
     if (!csv.rows.length || !convert) throw new SourceError(PROVIDER);

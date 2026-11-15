@@ -55,7 +55,7 @@ export interface ConversationSession {
   createdAt: string;
   updatedAt: string;
   analysisId?: string;
-  workflow?: 'meteomatics' | 'trend';
+  workflow?: 'meteomatics' | 'giovanni' | 'trend';
 }
 export interface ListSessionsResponse { sessions: ConversationSession[] }
 export interface SessionRequest { sessionId: string }
@@ -204,3 +204,28 @@ export interface MeteomaticsChartTrend {
 }
 
 export interface MeteomaticsSuggestionsResponse { suggestions: string[] }
+
+/** NASA Giovanni point time-series request (chat workflow). Dates are UTC calendar days, YYYY-MM-DD. */
+export interface GiovanniQuerySpec {
+  variables: string[];
+  point: MeteomaticsCoordinate;
+  startDate: string;
+  endDate: string;
+}
+export interface GiovanniCatalogResponse { version: string; sourceUrl: string; variables: import('./giovanni.types').GiovanniVariable[] }
+export interface InterpretGiovanniRequest { query: string }
+export interface InterpretGiovanniResponse { status: 'ready' | 'needs_clarification'; spec?: GiovanniQuerySpec; summary: string; clarificationQuestions: string[]; suggestions?: string[]; locationLabel?: string }
+export interface GiovanniExecuteRequest { spec: GiovanniQuerySpec; confirmed: true }
+/** `result` uses the Meteomatics JSON envelope ({ data: [{ parameter: "<id>:<unit>", coordinates: [{ lat, lon, dates }] }] }) with raw provider values. */
+export interface GiovanniExecuteResponse { provider: 'NASA Giovanni'; source: 'giovanni'; requestedAt: string; request: GiovanniQuerySpec; responseFormat: 'json'; result: unknown; provenance: DataProvenance; chartTrends?: MeteomaticsChartTrend[] }
+export type QueryExecuteResponse = MeteomaticsExecuteResponse | GiovanniExecuteResponse;
+export interface GiovanniSessionState {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  proposal: GiovanniQuerySpec | null;
+  results: GiovanniExecuteResponse[];
+  suggestions: string[];
+  summary: string;
+  locationLabel: string;
+  selectedParameters: string[];
+}
+export type QuerySessionWorkflow = 'meteomatics' | 'giovanni';

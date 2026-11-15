@@ -37,6 +37,7 @@ export const CONFIG = {
     createSession: positiveInteger('QUOTA_CREATE_SESSION', 50),
     meteomaticsAvailability: positiveInteger('QUOTA_METEOMATICS_AVAILABILITY', 30),
     meteomaticsExecute: positiveInteger('QUOTA_METEOMATICS_EXECUTE', 20),
+    giovanniExecute: positiveInteger('QUOTA_GIOVANNI_EXECUTE', 20),
   },
 } as const;
 

@@ -100,7 +100,7 @@ async function main() {
   } });
 
   if (args.list) {
-    for (const entry of GIOVANNI_VARIABLES) console.log(`${entry.id}\n  metric: ${entry.metric} → ${entry.meteomaticsParameter} (from ${entry.firstYear})\n  ${entry.dataset}\n  ${entry.documentationUrl}`);
+    for (const entry of GIOVANNI_VARIABLES) console.log(`${entry.id} (${entry.temporalResolution}, ${entry.unit}, from ${entry.firstYear})${entry.metric ? `\n  trend metric: ${entry.metric} → ${entry.meteomaticsParameter}` : ''}\n  ${entry.dataset}\n  ${entry.documentationUrl}`);
     return;
   }
 
@@ -108,7 +108,7 @@ async function main() {
   const mapping = GIOVANNI_VARIABLES.find(entry => entry.id === variable);
   const metric = args.metric ?? mapping?.metric;
   if (metric !== 'temperature' && metric !== 'precipitation') fail('Use --metric temperature|precipitation (or --variable with a mapped Giovanni ID; see --list).');
-  if (mapping && mapping.metric !== metric) fail(`${variable} is a ${mapping.metric} variable, not ${metric}.`);
+  if (mapping?.metric && mapping.metric !== metric) fail(`${variable} is a ${mapping.metric} variable, not ${metric}.`);
   const meteomaticsParameter = mapping?.meteomaticsParameter ?? (metric === 'temperature' ? 't_mean_2m_24h:C' : 'precip_24h:mm');
   const start = Number(args.start);
   const end = Number(args.end);

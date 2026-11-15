@@ -30,7 +30,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 // Same mapping and transforms as the backend GiovanniProvider (Node 22 strips the TypeScript types).
 import { EARTHDATA_TOKEN_URL, GIOVANNI_DEFAULT_VARIABLE, GIOVANNI_TIME_SERIES_URL, GIOVANNI_UNIT_CONVERSIONS, GIOVANNI_VARIABLES } from '../shared/giovanni-catalog.constant.ts';
-import { parseGiovanniCsv, resolveGiovanniConversion, resolveGiovanniMonthly } from '../shared/giovanni.resolver.ts';
+import { giovanniSamplesPerDay, parseGiovanniCsv, resolveGiovanniConversion, resolveGiovanniMonthly } from '../shared/giovanni.resolver.ts';
 
 function fail(message, code = 1) {
   console.error(`Error: ${message}`);
@@ -136,7 +136,8 @@ async function main() {
   lon ??= Number(headers.lon);
   const convert = resolveGiovanniConversion(GIOVANNI_UNIT_CONVERSIONS, metric, headers.unit);
   if (!convert) fail(`Unsupported unit "${headers.unit ?? ''}" for ${metric}. Add an explicit, verified conversion in shared/giovanni-catalog.constant.ts.`);
-  const monthly = resolveGiovanniMonthly(parsed, convert, start, end);
+  // Unknown IDs (--variable) are assumed daily or monthly; catalog hourly products need all 24 hours of every day.
+  const monthly = resolveGiovanniMonthly(parsed, convert, start, end, giovanniSamplesPerDay(mapping?.temporalResolution ?? 'daily'));
   const retrievedAt = new Date().toISOString();
   const idLabel = variable ?? headers.param_name ?? 'unknown variable';
 

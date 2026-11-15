@@ -7,7 +7,7 @@ export interface GiovanniVariable {
   domain: string;
   /** Unit as documented by GES DISC; values are always labeled with the unit Giovanni reports. */
   unit: string;
-  temporalResolution: 'monthly' | 'daily';
+  temporalResolution: 'monthly' | 'daily' | 'hourly';
   /** First calendar year of the product. */
   firstYear: number;
   dataset: string;

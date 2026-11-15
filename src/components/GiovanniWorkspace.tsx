@@ -9,6 +9,7 @@ import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
 import { DictationButton } from './DictationButton';
+import { SessionLoading } from './SessionLoading';
 
 type ChatLine = { role: 'user' | 'assistant'; content: string };
 const errorText = (cause: unknown) => {
@@ -97,6 +98,8 @@ export function GiovanniWorkspace({ sessionId, onSessionUpdated, tools }: { sess
         renderInput={params => <TextField {...params} autoFocus label="NASA Earth science variables" placeholder="Variable name or Giovanni ID" helperText={catalog ? `Optional · up to 5 · ${catalog.variables.length} variables · catalog ${catalog.version}` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
         renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.description}</strong><br />{option.id} · {option.temporalResolution} · {option.unit} · from {option.firstYear}</span></li>} />
     </Popover></>;
+
+  if (!loaded) return <SessionLoading />;
 
   return <section className={`chat-workspace ${empty ? 'is-empty' : ''}`} aria-label="NASA Giovanni query assistant">
     {empty && <ChatGreeting />}

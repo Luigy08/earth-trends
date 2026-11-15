@@ -9,6 +9,8 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [proposal, setProposal] = useState<AnalysisSpec | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openingSession, setOpeningSession] = useState<ConversationSession | null>(null);
+  const openRequest = useRef(0);
   const [error, setError] = useState('');
   const creating = useRef(false);
 
@@ -19,14 +21,17 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   }, []);
 
   const open = useCallback(async (session: ConversationSession) => {
-    setBusy(true); setError(''); onRestoreAnalysis(null);
+    const request = ++openRequest.current;
+    setOpeningSession(session); setBusy(true); setError(''); onRestoreAnalysis(null);
     try {
       const result = await getSession({ sessionId: session.id });
+      const analysis = result.session.analysisId ? (await getAnalysis({ analysisId: result.session.analysisId })).analysis : null;
+      if (request !== openRequest.current) return;
       setCurrent(result.session); setMessages(result.messages);
       setProposal([...result.messages].reverse().find(message => message.role === 'assistant')?.spec ?? null);
-      onRestoreAnalysis(result.session.analysisId ? (await getAnalysis({ analysisId: result.session.analysisId })).analysis : null);
-    } catch (cause) { setError(errorMessage(cause)); }
-    finally { setBusy(false); }
+      onRestoreAnalysis(analysis);
+    } catch (cause) { if (request === openRequest.current) setError(errorMessage(cause)); }
+    finally { if (request === openRequest.current) { setOpeningSession(null); setBusy(false); } }
   }, [onRestoreAnalysis]);
 
   useEffect(() => {
@@ -60,6 +65,7 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   const create = useCallback(async () => {
     if (creating.current) return;
     creating.current = true;
+    openRequest.current++; setOpeningSession(null);
     setBusy(true); setError('');
     try {
       const { session } = await createSession();
@@ -119,5 +125,5 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
     setCurrent(item => item?.id === session.id ? session : item);
   }, []);
 
-  return { updateSession, sessions, current, messages, proposal, busy, error, create, open, send, submit, rename, remove };
+  return { updateSession, sessions, current, messages, proposal, busy, openingSession, error, create, open, send, submit, rename, remove };
 }

@@ -14,7 +14,8 @@ export const INGEST_TARGETS: readonly IngestTarget[] = [
   // SMAP L4 is 3-hourly at source: yearly requests keep each statistics file small.
   { variableId: 'soil_moisture_surface', parameter: 'appeears/SPL4SMGP.008/Geophysical_Data_sm_surface:m3m3', mode: 'range', zoneLevel: 'ADM1', since: '2015-03-31', chunkYears: 1, cadenceDays: 1 },
   // The free Meteomatics plan only serves the last 24 h, so the series is built one day at a time:
-  // 24 hourly values are averaged into one daily mean labelled with the local date the window starts on.
+  // 24 hourly values are averaged into one daily mean labelled with the local date the window starts on
+  // (the 23:15 local run of the hourly schedule covers the whole local day).
   { variableId: 'air_temperature_2m', parameter: 'meteomatics/t_2m:C', mode: 'trailing', zoneLevel: 'ADM1', trailingHours: 24, step: 'PT1H', utcOffsetHours: HONDURAS_UTC_OFFSET_HOURS, minSamplesPerDay: 18 },
 ];
 

@@ -11,6 +11,8 @@ import { Sidebar } from './components/Sidebar';
 import { ConversationWorkspace } from './components/ConversationWorkspace';
 import { MeteomaticsWorkspace } from './components/MeteomaticsWorkspace';
 import { GiovanniWorkspace } from './components/GiovanniWorkspace';
+import { EarthdataWorkspace } from './components/EarthdataWorkspace';
+import { QUERY_ASSISTANT_NAMES } from './app.constant';
 import { WorkflowSelect } from './components/WorkflowSelect';
 import { ChatComposer, ChatGreeting } from './components/ChatComposer';
 import { DictationButton } from './components/DictationButton';
@@ -29,11 +31,11 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
   const sessions = useSessions(restoreAnalysis);
   const restoredSessionId = useRef<string | undefined>(undefined);
   useEffect(() => {
-    // Sessions saved by the Meteomatics or Giovanni chats are tagged; trend sessions are recognized by their conversation or analysis.
+    // Sessions saved by the Meteomatics, Giovanni or Earthdata chats are tagged; trend sessions are recognized by their conversation or analysis.
     if (sessions.busy || !sessions.current || restoredSessionId.current === sessions.current.id) return;
     restoredSessionId.current = sessions.current.id;
     const { workflow } = sessions.current;
-    if (workflow === 'meteomatics' || workflow === 'giovanni') { setQueryWorkflow(workflow); return; }
+    if (workflow === 'meteomatics' || workflow === 'giovanni' || workflow === 'earthdata') { setQueryWorkflow(workflow); return; }
     const isTrend = workflow === 'trend' || Boolean(sessions.current.analysisId) || sessions.messages.length > 0;
     setQueryWorkflow(isTrend ? 'trend' : 'meteomatics');
   }, [sessions.busy, sessions.current, sessions.messages.length]);
@@ -55,10 +57,12 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
             {showResults && <Results analysis={analysis} busy={analysisBusy} error={analysisError} onRetry={retry} canRetry={canRetry} onMethodology={() => setMethodologyOpen(true)} />}
           </ConversationWorkspace>}
           {queryWorkflow !== 'trend' && (sessions.current && !sessions.busy
-            ? queryWorkflow === 'giovanni'
+            ? queryWorkflow === 'earthdata'
+              ? <EarthdataWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
+              : queryWorkflow === 'giovanni'
               ? <GiovanniWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
               : <MeteomaticsWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
-            : <section className="chat-workspace is-empty" aria-label={queryWorkflow === 'giovanni' ? 'NASA Giovanni query assistant' : 'Meteomatics query assistant'}><ChatGreeting />{sessions.error && <Alert severity="error" className="chat-alert">{sessions.error}</Alert>}<div className="chat-dock"><ChatComposer value="" onChange={() => undefined} onSubmit={() => undefined} ariaLabel={queryWorkflow === 'giovanni' ? 'Message the NASA Giovanni assistant' : 'Message the Meteomatics assistant'} maxLength={2000} disabled canSubmit={false} placeholder={sessions.busy ? 'Connecting to your session…' : 'Session unavailable — check the message above'} tools={workflowSelect} actions={<DictationButton disabled onTranscript={() => undefined} />} /></div></section>)}
+            : <section className="chat-workspace is-empty" aria-label={`${QUERY_ASSISTANT_NAMES[queryWorkflow]} query assistant`}><ChatGreeting />{sessions.error && <Alert severity="error" className="chat-alert">{sessions.error}</Alert>}<div className="chat-dock"><ChatComposer value="" onChange={() => undefined} onSubmit={() => undefined} ariaLabel={`Message the ${QUERY_ASSISTANT_NAMES[queryWorkflow]} assistant`} maxLength={2000} disabled canSubmit={false} placeholder={sessions.busy ? 'Connecting to your session…' : 'Session unavailable — check the message above'} tools={workflowSelect} actions={<DictationButton disabled onTranscript={() => undefined} />} /></div></section>)}
         </>}
         {page === 'analyses' && <AnalysesPage history={history} onSelect={item => { select(item); setQueryWorkflow('trend'); navigate('explore'); setTimeout(() => document.getElementById('evidencia')?.scrollIntoView({ behavior: 'smooth' }), 100); }} onExplore={() => navigate('explore')} />}
         {page === 'realtime' && <RealtimePage analysis={analysis} onExplore={() => navigate('explore')} />}

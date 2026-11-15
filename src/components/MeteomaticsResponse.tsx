@@ -5,7 +5,13 @@ import { MeteomaticsChart } from './MeteomaticsChart';
 import { VirtualizedResultsTable } from './VirtualizedResultsTable';
 import { downloadMeteomaticsJson, resolveMeteomaticsResult } from '../meteomatics-query.resolver';
 
-/** Renders Meteomatics results and Giovanni results (which use the same JSON envelope). */
+function displayValue(value: number | string | null): string {
+  if (value === null) return 'No value';
+  if (typeof value === 'number' && [-999, -888, -777, -666].includes(value)) return `Missing (${value})`;
+  return typeof value === 'number' ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value) : value;
+}
+
+/** Renders Meteomatics results, and Giovanni and Earthdata results (which use the same JSON envelope). */
 export function MeteomaticsResponse({ result }: { result: QueryExecuteResponse }) {
   const [showRaw, setShowRaw] = useState(false);
   const normalized = useMemo(() => result.responseFormat === 'json' ? resolveMeteomaticsResult(result.result, Infinity) : null, [result]);

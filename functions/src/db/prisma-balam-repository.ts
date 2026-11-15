@@ -130,6 +130,10 @@ export class PrismaBalamRepository implements IngestRepository, BalamReadReposit
     }));
   }
 
+  async activeIngestions(): Promise<{ variableId: string; source: string }[]> {
+    return this.prisma.ingestionJob.findMany({ where: { status: { in: ACTIVE } }, distinct: ['variableId', 'source'], select: { variableId: true, source: true } });
+  }
+
   async coverage(): Promise<StoredCoverage[]> {
     const groups = await this.prisma.trend.groupBy({ by: ['variableId', 'source'], _min: { firstDate: true }, _max: { lastDate: true }, _count: { zoneId: true } });
     return groups.flatMap((group) => (group._min.firstDate && group._max.lastDate

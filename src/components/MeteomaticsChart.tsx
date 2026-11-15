@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { Button, MenuItem, TextField } from '@mui/material';
-import { CartesianGrid, Legend, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
+import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
 import type { QueryExecuteResponse } from '../../shared/types';
 import { resolveMeteomaticsResult } from '../meteomatics-query.resolver';
+import { LARGE_CHART_POINT_THRESHOLD } from '../meteomatics-query.constant';
+import type { QueryChartType } from '../meteomatics-query.types';
 import { COLORS, FONTS } from '../theme.constant';
 
 const YEAR_MS = 31556952000;
@@ -11,6 +13,7 @@ const formatNumber = (value: number) => new Intl.NumberFormat('en-US', { maximum
 export function MeteomaticsChart({ result }: { result: QueryExecuteResponse }) {
   const [selected, setSelected] = useState('');
   const [view, setView] = useState('annual');
+  const [chartType, setChartType] = useState<QueryChartType>('auto');
   const [showTrend, setShowTrend] = useState(true);
   const series = useMemo(() => {
     const rows = resolveMeteomaticsResult(result.result, Infinity)?.rows ?? [];
@@ -40,6 +43,8 @@ export function MeteomaticsChart({ result }: { result: QueryExecuteResponse }) {
   const showFit = Boolean(fit && stats && view === 'daily' && showTrend);
   const aggregateAvailable = Boolean(analysis?.aggregation && analysis.monthly);
   const chartPoints = aggregateAvailable && view === 'annual' ? analysis!.annual.map(point => ({ time: Date.UTC(point.year, 0, 1), value: point.value })) : aggregateAvailable && view === 'monthly' ? analysis!.monthly!.flatMap(point => point.value === null ? [] : [{ time: Date.UTC(point.year, point.month - 1, 1), value: point.value }]) : points;
+  const effectiveChartType = chartType === 'auto' ? chartPoints.length > LARGE_CHART_POINT_THRESHOLD ? 'line' : 'points' : chartType;
+  const seriesName = `${aggregateAvailable && view !== 'daily' ? view === 'annual' ? 'Annual values' : 'Monthly values' : 'Daily observations'} (${unit})`;
   const downloadSeries = () => {
     if (!analysis?.monthly) return;
     const rows = ['year,month,value', ...analysis.monthly.map(point => `${point.year},${point.month},${point.value ?? ''}`)];
@@ -52,10 +57,11 @@ export function MeteomaticsChart({ result }: { result: QueryExecuteResponse }) {
     <h4>Change over time</h4>
     {series.length > 1 && <TextField select label="Variable and location" size="small" value={key} onChange={event => setSelected(event.target.value)} fullWidth>{series.map(([name]) => <MenuItem key={name} value={name}>{name}</MenuItem>)}</TextField>}
     {aggregateAvailable && <><TextField select label="Time resolution" size="small" value={view} onChange={event => setView(event.target.value)} sx={{ minWidth: 160, mt: 1 }}><MenuItem value="annual">Annual</MenuItem><MenuItem value="monthly">Monthly</MenuItem><MenuItem value="daily">Daily</MenuItem></TextField><label style={{ marginLeft: 12 }}><input type="checkbox" checked={showTrend} onChange={event => setShowTrend(event.target.checked)} /> Show trend</label></>}
-    <p>{aggregateAvailable ? `${view === 'annual' ? 'Annual' : view === 'monthly' ? 'Monthly' : 'Daily'} ${view === 'daily' ? 'observations' : analysis!.aggregation === 'sum' ? 'total' : 'mean'}` : 'Returned observations'} · {unit} · {chartPoints.length.toLocaleString('en-US')} valid points</p>
+    <TextField select label="Chart type" size="small" value={chartType} onChange={event => setChartType(event.target.value as QueryChartType)} sx={{ minWidth: 160, mt: 1, ml: aggregateAvailable ? 1 : 0 }}><MenuItem value="auto">Automatic</MenuItem><MenuItem value="points">Points</MenuItem><MenuItem value="line">Line</MenuItem><MenuItem value="bar">Bars</MenuItem></TextField>
+    <p>{aggregateAvailable ? `${view === 'annual' ? 'Annual' : view === 'monthly' ? 'Monthly' : 'Daily'} ${view === 'daily' ? 'observations' : analysis!.aggregation === 'sum' ? 'total' : 'mean'}` : 'Returned observations'} · {unit} · {chartPoints.length.toLocaleString('en-US')} valid points{chartType === 'auto' ? ` · ${effectiveChartType === 'line' ? 'Line' : 'Points'} (automatic)` : ''}</p>
     {view === 'daily' && fit && <div className="meteo-chart-summary"><strong>Daily observations</strong><br />{showFit ? <>y = {formatNumber(fit.slopePerYear)} · t {fit.intercept < 0 ? '−' : '+'} {formatNumber(Math.abs(fit.intercept))}<br />t: years since {new Date(fit.origin).toISOString().slice(0, 10)}<br />Change per decade: {formatNumber(fit.slopePerYear * 10)} {unit}<br />R²: {fit.rSquared === null ? '—' : formatNumber(fit.rSquared)}<br /></> : null}Mean: {formatNumber(fit.mean)} {unit}<br />Maximum: {formatNumber(fit.maximum)} {unit}<br />n = {fit.count.toLocaleString('en-US')}</div>}
     <div className="meteo-chart-plot">
-      <ResponsiveContainer width="100%" height={420}><ScatterChart margin={{ top: 15, right: 20, bottom: 10, left: 5 }}><CartesianGrid stroke={COLORS.slateLine} /><XAxis tick={{ fontFamily: FONTS.data, fontSize: 11 }} dataKey="time" type="number" domain={[start, end]} ticks={ticks} tickFormatter={time => String(new Date(Number(time)).getUTCFullYear())} minTickGap={24} /><ZAxis range={[12, 12]} /><YAxis tick={{ fontFamily: FONTS.data, fontSize: 11 }} dataKey="value" type="number" domain={['auto', 'auto']} width={65} /><Tooltip labelFormatter={value => new Date(Number(value)).toISOString().slice(0, 10)} formatter={(value, name) => [typeof value === 'number' ? formatNumber(value) : value, name]} /><Legend /><Scatter name={`${aggregateAvailable && view !== 'daily' ? view === 'annual' ? 'Annual values' : 'Monthly values' : 'Daily observations'} (${unit})`} data={chartPoints} fill={COLORS.chartBlue} fillOpacity={0.35} shape="circle" legendType="circle" />{annualLine.length > 0 && <Scatter name={`Annual trend (${unit}/year)`} data={annualLine} fill={COLORS.chartRed} line={{ stroke: COLORS.chartRed, strokeWidth: 2 }} shape={() => <g />} legendType="line" />}{showFit && fit && <Scatter name={`Daily linear fit (${formatNumber(fit.slopePerYear)} ${unit}/year)`} data={trendPoints} fill={COLORS.chartRed} line={{ stroke: COLORS.chartRed, strokeWidth: 2 }} shape={() => <g />} legendType="line" />}</ScatterChart></ResponsiveContainer>
+      <ResponsiveContainer width="100%" height={420}><ComposedChart data={chartPoints} margin={{ top: 15, right: 20, bottom: 10, left: 5 }}><CartesianGrid stroke={COLORS.slateLine} /><XAxis tick={{ fontFamily: FONTS.data, fontSize: 11 }} dataKey="time" type="number" domain={[start, end]} ticks={ticks} tickFormatter={time => String(new Date(Number(time)).getUTCFullYear())} minTickGap={24} /><ZAxis range={[12, 12]} /><YAxis tick={{ fontFamily: FONTS.data, fontSize: 11 }} dataKey="value" type="number" domain={['auto', 'auto']} width={65} /><Tooltip labelFormatter={value => new Date(Number(value)).toISOString().slice(0, 10)} formatter={(value, name) => [typeof value === 'number' ? formatNumber(value) : value, name]} /><Legend />{effectiveChartType === 'points' && <Scatter name={seriesName} data={chartPoints} fill={COLORS.chartBlue} fillOpacity={0.35} shape="circle" legendType="circle" isAnimationActive={false} />}{effectiveChartType === 'line' && <Line name={seriesName} dataKey="value" type="linear" stroke={COLORS.chartBlue} dot={false} isAnimationActive={false} />}{effectiveChartType === 'bar' && <Bar name={seriesName} dataKey="value" fill={COLORS.chartBlue} isAnimationActive={false} />}{annualLine.length > 0 && <Scatter name={`Annual trend (${unit}/year)`} data={annualLine} fill={COLORS.chartRed} line={{ stroke: COLORS.chartRed, strokeWidth: 2 }} shape={() => <g />} legendType="line" />}{showFit && fit && <Scatter name={`Daily linear fit (${formatNumber(fit.slopePerYear)} ${unit}/year)`} data={trendPoints} fill={COLORS.chartRed} line={{ stroke: COLORS.chartRed, strokeWidth: 2 }} shape={() => <g />} legendType="line" />}</ComposedChart></ResponsiveContainer>
     </div>
     {!aggregateAvailable && <p>Aggregation is unavailable for this parameter or request; only returned observations are shown.</p>}
     {aggregateAvailable && <p>Excluded incomplete years: {analysis!.excludedYears?.join(', ') || 'None'}. Anomalies {analysis!.annual.some(point => point.anomaly !== null) ? 'use the complete 1991–2020 baseline.' : 'are unavailable because the 1991–2020 baseline is incomplete.'}</p>}

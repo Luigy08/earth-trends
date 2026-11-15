@@ -188,6 +188,9 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
   const value = response.output;
   if (!value) throw new Error('The model did not return a valid Meteomatics request.');
   const clarificationQuestions = value.clarificationQuestions.slice(0, 6).map(question => question.slice(0, 300));
+  if (!value.mode && (value.locationQuery || value.point) && !value.grid && !value.stationIds && !value.route && !value.polygon && !value.trajectory) value.mode = 'point';
+  value.source ||= value.mode === 'station' ? 'mix-obs' : 'mix';
+  value.format ||= 'json';
   const sourceIssue = meteomaticsSourceIssue(value.source);
   if (sourceIssue) { value.ready = false; clarificationQuestions.push(sourceIssue); }
   let locationLabel: string | undefined;
@@ -198,7 +201,7 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
     if (place.question) { value.ready = false; clarificationQuestions.push(place.question); }
   }
   const metadata = { suggestions: value.suggestions.slice(0, 3), ...(locationLabel ? { locationLabel } : {}) };
-  if ((value.ready || clarificationQuestions.length === 0) && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
+  if (clarificationQuestions.length === 0 && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
     const specCandidate = {
       options: Object.fromEntries(Object.entries(value.options ?? {}).filter(([, entry]) => entry !== null)),
       mode: value.mode, source: value.source, parameters: value.parameters, validDates: value.validDates.replace(/(Z|[+-]\d{2}:?\d{2})\/(?=\d{4}-\d{2}-\d{2}T)/g, '$1--'), format: value.format,
@@ -211,7 +214,13 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
     if (parsed.success) return { status: 'ready', spec: parsed.data as MeteomaticsQuerySpec, summary: value.summary, clarificationQuestions: [], ...metadata };
     clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
   }
-  if (!clarificationQuestions.length) clarificationQuestions.push('Provide a parameter, source, UTC date or date range, request mode, and the location details required for that mode.');
+  if (!clarificationQuestions.length) {
+    if (!value.parameters.length) clarificationQuestions.push('Which weather variable would you like to explore?');
+    if (!value.validDates) clarificationQuestions.push('What date or date range and sampling interval would you like to use?');
+    if (!value.mode) clarificationQuestions.push('Which location or area would you like to explore?');
+    if (value.mode === 'point' && !value.point) clarificationQuestions.push('Which city and country, or coordinates, would you like to use?');
+    if (!clarificationQuestions.length) clarificationQuestions.push('Could you clarify the location or request details?');
+  }
   return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...metadata };
 }
 

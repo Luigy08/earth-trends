@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Analysis, AnalysisSpec, ConversationMessage, ConversationSession } from '../../shared/types';
 import { attachSessionAnalysis, chatSession, createSession, deleteSession, getAnalysis, getSession, listSessions, renameSession } from '../services/firebase';
 import { errorMessage } from './resolver';
@@ -10,6 +10,7 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   const [proposal, setProposal] = useState<AnalysisSpec | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const creating = useRef(false);
 
   const refresh = useCallback(async () => {
     const { sessions: items } = await listSessions();
@@ -57,12 +58,14 @@ export function useSessions(onRestoreAnalysis: (analysis: Analysis | null) => vo
   }, [open, refresh, onRestoreAnalysis]);
 
   const create = useCallback(async () => {
+    if (creating.current) return;
+    creating.current = true;
     setBusy(true); setError('');
     try {
       const { session } = await createSession();
       setSessions(items => [session, ...items]); setCurrent(session); setMessages([]); setProposal(null); onRestoreAnalysis(null);
-    } catch (cause) { setError(errorMessage(cause)); }
-    finally { setBusy(false); }
+    } catch (cause) { setError(`Could not create a new session. ${errorMessage(cause)}`); }
+    finally { creating.current = false; setBusy(false); }
   }, [onRestoreAnalysis]);
 
   const send = useCallback(async (message: string) => {

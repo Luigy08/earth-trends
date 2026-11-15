@@ -102,8 +102,14 @@ export const saveMeteomaticsSession = onCall(callableOptions, async request => {
   const ref = db.collection('sessions').doc(input.sessionId);
   const old = await ref.collection('meteoState').get();
   const batch = db.batch();
-  old.docs.forEach(doc => batch.delete(doc.ref));
-  chunks.forEach((data, index) => batch.set(ref.collection('meteoState').doc(String(index).padStart(5, '0')), { index, data }));
+  const existing = new Map(old.docs.map(doc => [doc.id, doc]));
+  chunks.forEach((data, index) => {
+    const id = String(index).padStart(5, '0');
+    const previous = existing.get(id);
+    if (previous?.get('data') !== data) batch.set(ref.collection('meteoState').doc(id), { index, data });
+    existing.delete(id);
+  });
+  existing.forEach(doc => batch.delete(doc.ref));
   const first = state.messages.find((message: { role?: string; content?: string }) => message.role === 'user' && typeof message.content === 'string');
   const title = session.session.title === 'New climate question' && first ? first.content.slice(0, 64).trim() : session.session.title;
   const updated = { ...session.session, title, workflow: input.workflow, updatedAt: new Date().toISOString() };

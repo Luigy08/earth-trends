@@ -36,6 +36,7 @@ const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecr
 
 function requireOwner(request: CallableRequest<unknown>): string {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to continue.');
+  if (request.auth.token.firebase?.sign_in_provider === 'anonymous') throw new HttpsError('unauthenticated', 'Sign in with Google to continue.');
   return request.auth.uid;
 }
 

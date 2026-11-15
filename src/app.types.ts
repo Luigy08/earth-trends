@@ -15,3 +15,4 @@ export type NavigationPage = 'explore' | 'analyses' | 'realtime';
 export type QueryMode = 'question' | 'form';
 export type AnalysisDraft = Omit<AnalysisSpec, 'locations'> & { locations: (Location | null)[] };
 export type ChartRow = { label: string; [key: string]: string | number | null };
+export type AuthStatus = 'unconfigured' | 'loading' | 'signed_out' | 'signed_in';

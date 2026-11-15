@@ -1,6 +1,6 @@
-import { initializeApp, getApps } from 'firebase/app';
+import { FirebaseError, initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
+import { connectAuthEmulator, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
 import { ENV_KEYS } from '../app.constant';
@@ -8,34 +8,50 @@ import { ENV_KEYS } from '../app.constant';
 const env = import.meta.env;
 export const missingConfig = ENV_KEYS.filter(key => !env[key] && !(key === 'VITE_FIREBASE_APPCHECK_SITE_KEY' && env.VITE_USE_FIREBASE_EMULATORS === 'true'));
 export const isConfigured = missingConfig.length === 0;
-let authentication: Promise<unknown> | undefined;
+let firebaseApp: FirebaseApp | undefined;
 let functions: ReturnType<typeof getFunctions> | undefined;
 
-async function connect() {
+function initialize() {
   if (!isConfigured) throw new Error('Configure Firebase to query live data.');
-  if (!functions) {
-    const app = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
+  if (!firebaseApp || !functions) {
+    firebaseApp = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
     if (env.VITE_USE_FIREBASE_EMULATORS !== 'true') {
       if (import.meta.env.DEV && window.location.hostname === 'localhost') {
         (self as typeof self & { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
       }
-      initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
+      initializeAppCheck(firebaseApp, { provider: new ReCaptchaEnterpriseProvider(env.VITE_FIREBASE_APPCHECK_SITE_KEY), isTokenAutoRefreshEnabled: true });
     }
-    const auth = getAuth(app);
-    functions = getFunctions(app, env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1');
+    const auth = getAuth(firebaseApp);
+    functions = getFunctions(firebaseApp, env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1');
     if (env.VITE_USE_FIREBASE_EMULATORS === 'true') {
       connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
       connectFunctionsEmulator(functions, '127.0.0.1', 5001);
     }
-    authentication = auth.authStateReady().then(async () => { if (!auth.currentUser) await signInAnonymously(auth); }).catch(error => { authentication = undefined; throw error; });
   }
-  if (!authentication) {
-    const auth = getAuth();
-    authentication = signInAnonymously(auth).catch(error => { authentication = undefined; throw error; });
-  }
-  await authentication;
-  return functions;
+  return { auth: getAuth(firebaseApp), functions };
 }
+
+async function connect() {
+  const { auth, functions: client } = initialize();
+  await auth.authStateReady();
+  if (!auth.currentUser || auth.currentUser.isAnonymous) throw new Error('Sign in with Google to continue.');
+  return client;
+}
+
+export const watchAuthUser = (onChange: (user: User | null) => void) => onAuthStateChanged(initialize().auth, user => onChange(user && !user.isAnonymous ? user : null));
+
+export async function signInWithGoogle() {
+  const { auth } = initialize();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try { await signInWithPopup(auth, provider); }
+  catch (error) {
+    if (error instanceof FirebaseError && error.code === 'auth/popup-blocked') await signInWithRedirect(auth, provider);
+    else throw error;
+  }
+}
+
+export const signOutUser = () => signOut(initialize().auth);
 
 async function call<Request, Response>(name: string, data: Request): Promise<Response> {
   const client = await connect();

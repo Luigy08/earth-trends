@@ -9,3 +9,11 @@ export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 export const SERIES_COLORS = ['#295846', '#d7754e'];
 export const CHART_VIEWS = [{ value: 'annual', label: 'Annual' }, { value: 'monthly', label: 'Monthly' }, { value: 'anomaly', label: 'Anomalies' }] as const;
 export const ENV_KEYS = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID', 'VITE_FIREBASE_APPCHECK_SITE_KEY'] as const;
+export const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  'auth/popup-closed-by-user': '',
+  'auth/cancelled-popup-request': '',
+  'auth/network-request-failed': 'We could not reach Google. Check your connection and try again.',
+  'auth/unauthorized-domain': 'This domain is not authorized for Google sign-in yet.',
+  'auth/operation-not-allowed': 'Google sign-in is not enabled for this project yet.',
+};
+export const AUTH_FALLBACK_ERROR = 'Google sign-in did not complete. Please try again.';

@@ -4,6 +4,8 @@ import { logger } from 'firebase-functions';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onRequest } from 'firebase-functions/v2/https';
+import { onSchedule } from 'firebase-functions/v2/scheduler';
 import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, InterpretMeteomaticsResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
 import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { CONFIG } from './config.constant';
@@ -20,6 +22,7 @@ import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
 import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
+import { balamApiOptions, balamBackfillOptions, balamIngestOptions, handleBalamApi, runBalamBackfill, runBalamIngest } from './balam/balam.functions';
 import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, interpretMeteomaticsSchema, interpretQuerySchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
@@ -229,3 +232,8 @@ export const processAnalysis = onDocumentCreated({
     throw new Error('Analysis processing failed; it will be retried if attempts remain.');
   }
 });
+
+// Balam: multi-source data (Meteomatics + NASA AppEEARS) preloaded into PostgreSQL. Independent of the callables above.
+export const balamIngest = onSchedule(balamIngestOptions, runBalamIngest);
+export const balamApi = onRequest(balamApiOptions, handleBalamApi);
+export const balamBackfill = onCall(balamBackfillOptions, runBalamBackfill);

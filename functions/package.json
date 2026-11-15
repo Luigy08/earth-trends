@@ -5,21 +5,33 @@
   "main": "lib/functions/src/index.js",
   "engines": { "node": "22" },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test .test-lib/functions/test/*.test.js",
-    "check": "npm run typecheck && npm test"
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "test": "prisma generate && tsc -p tsconfig.test.json && node --test .test-lib/functions/test/*.test.js",
+    "check": "npm run typecheck && npm test",
+    "sync:appeears": "npm run build && node lib/functions/src/scripts/sync-appeears-catalog.js",
+    "seed:zones": "npm run build && node lib/functions/src/scripts/seed-zones.js",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "1.44.0",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
     "firebase-admin": "14.5.1",
     "firebase-functions": "7.4.0",
     "genkit": "1.44.0",
     "jstat": "1.9.6",
+    "pg": "8.23.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@turf/centroid": "^7.4.0",
+    "@turf/simplify": "^7.4.0",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^22.19.0",
+    "@types/pg": "^8.23.1",
+    "prisma": "7.10.1",
     "typescript": "^5.9.3"
   }
 }

@@ -1,0 +1,87 @@
+// Balam data store: zones, pre-ingested observations, trends and job state.
+// The connection URL lives in prisma.config.ts (CLI) and in src/db/client.ts (runtime, pooled URL).
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Zone {
+  id           String        @id // ISO 3166-2, e.g. "HN-FM"
+  name         String
+  level        String // "ADM1" | "ADM2"
+  country      String        @default("HN")
+  centroidLat  Float
+  centroidLon  Float
+  geometry     Json
+  observations Observation[]
+}
+
+model Observation {
+  variableId String // canonical id: "ndvi", "land_surface_temperature_day"…
+  source     String // "appeears" | "meteomatics"
+  parameter  String // full Balam parameter string
+  zoneId     String
+  zone       Zone     @relation(fields: [zoneId], references: [id])
+  date       DateTime @db.Date
+  value      Float?
+  min        Float?
+  max        Float?
+  median     Float?
+  std        Float?
+  count      Int?
+  ingestedAt DateTime @default(now())
+
+  @@id([variableId, source, zoneId, date])
+  @@index([zoneId, variableId, date])
+}
+
+model Trend {
+  variableId        String
+  source            String
+  zoneId            String
+  unit              String
+  firstDate         DateTime @db.Date
+  lastDate          DateTime @db.Date
+  n                 Int
+  annual            Json // [{ year, mean, count, months }]
+  monthly           Json // [{ month: "2024-01", mean, count }]
+  climatology       Json // mean per calendar month (1–12)
+  olsSlopePerDecade Float?
+  senSlopePerDecade Float?
+  mannKendallZ      Float?
+  mannKendallP      Float?
+  updatedAt         DateTime @updatedAt
+
+  @@id([variableId, source, zoneId])
+}
+
+model IngestionJob {
+  id         String   @id @default(uuid())
+  variableId String
+  source     String
+  parameter  String
+  zoneIds    String[]
+  start      DateTime @db.Date
+  end        DateTime @db.Date
+  status     String // pending | processing | done | error
+  queryJobId String?
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([status])
+}
+
+// Persistence for BalamJob (replaces MemoryJobStore).
+model QueryJob {
+  id        String   @id
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

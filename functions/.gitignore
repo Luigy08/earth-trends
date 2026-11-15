@@ -6,3 +6,4 @@ lib/
 .secret.local
 coverage/
 .test-lib/
+src/generated/

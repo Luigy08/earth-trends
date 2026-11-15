@@ -1,11 +1,5 @@
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { logger } from 'firebase-functions';
-import { setGlobalOptions } from 'firebase-functions/v2';
-import { onCall, HttpsError, type CallableRequest } from 'firebase-functions/v2/https';
-import { onDocumentCreated } from 'firebase-functions/v2/firestore';
-import { onRequest } from 'firebase-functions/v2/https';
-import { onSchedule } from 'firebase-functions/v2/scheduler';
 import type { EarthdataCatalogResponse, EarthdataExecuteResponse, EarthdataQuerySpec, InterpretEarthdataResponse } from '../../shared/types';
 import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteResponse, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretMeteomaticsResponse, QueryExecuteResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
 import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
@@ -14,9 +8,9 @@ import { FirestoreCache } from './cache';
 import { AnalysisRepository } from './repository';
 import { SessionRepository } from './sessions';
 import { AnalysisService } from './analysis';
-import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics';
+import { MeteomaticsProvider } from './providers/meteomatics';
 import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
-import { GiovanniProvider, giovanniSecrets } from './providers/giovanni';
+import { GiovanniProvider } from './providers/giovanni';
 import { GiovanniQueryProvider } from './providers/giovanni-query';
 import { resolveGiovanniChart } from './giovanni-chart.resolver';
 import { GIOVANNI_CATALOG_SOURCE, GIOVANNI_CATALOG_VERSION, GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
@@ -26,9 +20,12 @@ import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
 import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
 import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
-import { SourceError } from './http';
-import { balamApiOptions, balamBackfillOptions, balamIngestOptions, getIngest as getBalamIngest, getRepository as getBalamRepository, handleBalamApi, runBalamBackfill, runBalamIngest } from './balam/balam.functions';
-import { balamDatabaseSecrets, balamSecrets } from './balam/balam.constant';
+import { HttpsError, SourceError } from './http';
+import { logger } from './logger';
+import { onCall } from './auth';
+import { AnalysisWorker } from './analysis-worker';
+import type { CallableRequest } from './backend.types';
+import { getIngest as getBalamIngest, getRepository as getBalamRepository, runBalamBackfill } from './balam/balam.functions';
 import { INGEST_TARGETS } from './ingest/targets.constant';
 import { EarthdataQueryProvider, EarthdataRequestError } from './providers/earthdata-query';
 import { resolveEarthdataChart } from './earthdata-chart.resolver';
@@ -36,7 +33,6 @@ import { earthdataExecuteSchema, interpretEarthdataSchema } from './validation';
 import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, giovanniExecuteSchema, interpretGiovanniSchema, interpretMeteomaticsSchema, interpretQuerySchema, saveQuerySessionSchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
-setGlobalOptions({ region: CONFIG.region, maxInstances: CONFIG.maxInstances });
 const db = getFirestore();
 const cache = new FirestoreCache(db);
 const repository = new AnalysisRepository(db);
@@ -45,13 +41,8 @@ const locations = new LocationSearch(cache);
 const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache, { giovanni: new GiovanniProvider(cache) });
 const meteomaticsQueries = new MeteomaticsQueryProvider(cache);
 const giovanniQueries = new GiovanniQueryProvider(cache);
-const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 120, memory: '512MiB' as const };
-const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
-const giovanniCallableOptions = { ...callableOptions, secrets: giovanniSecrets };
-// The Earthdata workflow reads the Balam store. Only running a query can ask NASA for missing data, so only it binds the provider secrets.
+// The Earthdata workflow reads the Balam store. Only running a query can ask NASA for missing data.
 const earthdataQueries = new EarthdataQueryProvider(getBalamRepository, INGEST_TARGETS, variableIds => getBalamIngest().plan({ variableIds, backfill: true }));
-const earthdataCallableOptions = { ...callableOptions, secrets: balamDatabaseSecrets };
-const earthdataExecuteOptions = { ...callableOptions, secrets: balamSecrets };
 
 function requireOwner(request: CallableRequest<unknown>): string {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in to continue.');
@@ -59,7 +50,7 @@ function requireOwner(request: CallableRequest<unknown>): string {
   return request.auth.uid;
 }
 
-export const interpretQuery = onCall(callableOptions, async (request): Promise<InterpretQueryResponse> => {
+export const interpretQuery = onCall(async (request): Promise<InterpretQueryResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(interpretQuerySchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
@@ -70,12 +61,12 @@ export const interpretQuery = onCall(callableOptions, async (request): Promise<I
   }
 });
 
-export const createSession = onCall(callableOptions, async request => {
+export const createSession = onCall(async request => {
   const ownerId = requireOwner(request);
   await consumeQuota(db, ownerId, 'createSession');
   return { session: await sessions.create(ownerId) };
 });
-export const getMeteomaticsSession = onCall(callableOptions, async request => {
+export const getMeteomaticsSession = onCall(async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(sessionRequestSchema, request.data);
   await sessions.get(ownerId, input.sessionId);
@@ -89,7 +80,7 @@ export const getMeteomaticsSession = onCall(callableOptions, async request => {
     : { ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }) as typeof state.results;
   return { state };
 });
-export const saveMeteomaticsSession = onCall(callableOptions, async request => {
+export const saveMeteomaticsSession = onCall(async request => {
   const ownerId = requireOwner(request);
   const sessionId = request.data?.sessionId;
   const state = request.data?.state;
@@ -111,24 +102,24 @@ export const saveMeteomaticsSession = onCall(callableOptions, async request => {
   await batch.commit();
   return { session: updated };
 });
-export const listSessions = onCall(callableOptions, async (request): Promise<ListSessionsResponse> => ({ sessions: await sessions.list(requireOwner(request)) }));
-export const getSession = onCall(callableOptions, async (request): Promise<GetSessionResponse> => {
+export const listSessions = onCall(async (request): Promise<ListSessionsResponse> => ({ sessions: await sessions.list(requireOwner(request)) }));
+export const getSession = onCall(async (request): Promise<GetSessionResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(sessionRequestSchema, request.data);
   return sessions.get(ownerId, input.sessionId);
 });
-export const renameSession = onCall(callableOptions, async request => {
+export const renameSession = onCall(async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(renameSessionSchema, request.data);
   return { session: await sessions.rename(ownerId, input.sessionId, input.title) };
 });
-export const deleteSession = onCall(callableOptions, async request => {
+export const deleteSession = onCall(async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(sessionRequestSchema, request.data);
   await sessions.delete(ownerId, input.sessionId);
   return { deleted: true as const };
 });
-export const attachSessionAnalysis = onCall(callableOptions, async (request): Promise<AttachSessionAnalysisResponse> => {
+export const attachSessionAnalysis = onCall(async (request): Promise<AttachSessionAnalysisResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(attachSessionAnalysisSchema, request.data);
   const analysis = await repository.get(ownerId, input.analysisId);
@@ -136,7 +127,7 @@ export const attachSessionAnalysis = onCall(callableOptions, async (request): Pr
   return { attached: true, message };
 });
 
-export const chatSession = onCall(callableOptions, async (request): Promise<ChatSessionResponse> => {
+export const chatSession = onCall(async (request): Promise<ChatSessionResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(chatSessionSchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
@@ -157,7 +148,7 @@ export const chatSession = onCall(callableOptions, async (request): Promise<Chat
   }
 });
 
-export const searchLocations = onCall(callableOptions, async (request): Promise<SearchLocationsResponse> => {
+export const searchLocations = onCall(async (request): Promise<SearchLocationsResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(searchLocationsSchema, request.data);
   await consumeQuota(db, ownerId, 'searchLocations');
@@ -165,7 +156,7 @@ export const searchLocations = onCall(callableOptions, async (request): Promise<
   catch { throw new HttpsError('unavailable', 'Location search is unavailable. Please try again later.'); }
 });
 
-export const getMeteomaticsSuggestions = onCall(callableOptions, async request => {
+export const getMeteomaticsSuggestions = onCall(async request => {
   requireOwner(request);
   try {
     const suggestions = await generateMeteomaticsSuggestions();
@@ -176,12 +167,12 @@ export const getMeteomaticsSuggestions = onCall(callableOptions, async request =
   }
 });
 
-export const getMeteomaticsCatalog = onCall(callableOptions, async (request): Promise<MeteomaticsCatalogResponse> => {
+export const getMeteomaticsCatalog = onCall(async (request): Promise<MeteomaticsCatalogResponse> => {
   requireOwner(request);
   return { version: METEOMATICS_CATALOG_VERSION, sourceUrl: METEOMATICS_CATALOG_SOURCE, parameters: [...METEOMATICS_PARAMETER_CATALOG] };
 });
 
-export const interpretMeteomatics = onCall(callableOptions, async (request): Promise<InterpretMeteomaticsResponse> => {
+export const interpretMeteomatics = onCall(async (request): Promise<InterpretMeteomaticsResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(interpretMeteomaticsSchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
@@ -192,7 +183,7 @@ export const interpretMeteomatics = onCall(callableOptions, async (request): Pro
   }
 });
 
-export const checkMeteomaticsAvailability = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsAvailabilityResponse> => {
+export const checkMeteomaticsAvailability = onCall(async (request): Promise<MeteomaticsAvailabilityResponse> => {
   const ownerId = requireOwner(request);
   const sourceIssue = meteomaticsSourceIssue(request.data?.spec?.source);
   if (sourceIssue) throw new HttpsError('invalid-argument', sourceIssue);
@@ -206,7 +197,7 @@ export const checkMeteomaticsAvailability = onCall(meteomaticsCallableOptions, a
   }
 });
 
-export const executeMeteomaticsQuery = onCall(meteomaticsCallableOptions, async (request): Promise<MeteomaticsExecuteResponse> => {
+export const executeMeteomaticsQuery = onCall(async (request): Promise<MeteomaticsExecuteResponse> => {
   const ownerId = requireOwner(request);
   const sourceIssue = meteomaticsSourceIssue(request.data?.spec?.source);
   if (sourceIssue) throw new HttpsError('invalid-argument', sourceIssue);
@@ -220,12 +211,12 @@ export const executeMeteomaticsQuery = onCall(meteomaticsCallableOptions, async 
   }
 });
 
-export const getGiovanniCatalog = onCall(callableOptions, async (request): Promise<GiovanniCatalogResponse> => {
+export const getGiovanniCatalog = onCall(async (request): Promise<GiovanniCatalogResponse> => {
   requireOwner(request);
   return { version: GIOVANNI_CATALOG_VERSION, sourceUrl: GIOVANNI_CATALOG_SOURCE, variables: [...GIOVANNI_VARIABLES] };
 });
 
-export const interpretGiovanni = onCall(callableOptions, async (request): Promise<InterpretGiovanniResponse> => {
+export const interpretGiovanni = onCall(async (request): Promise<InterpretGiovanniResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(interpretGiovanniSchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
@@ -236,7 +227,7 @@ export const interpretGiovanni = onCall(callableOptions, async (request): Promis
   }
 });
 
-export const executeGiovanniQuery = onCall(giovanniCallableOptions, async (request): Promise<GiovanniExecuteResponse> => {
+export const executeGiovanniQuery = onCall(async (request): Promise<GiovanniExecuteResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(giovanniExecuteSchema, request.data);
   await consumeQuota(db, ownerId, 'giovanniExecute');
@@ -253,13 +244,13 @@ function earthdataError(error: unknown, context: string): HttpsError {
   return new HttpsError('unavailable', 'The NASA Earthdata store is unavailable. Please try again later.');
 }
 
-export const getEarthdataCatalog = onCall(earthdataCallableOptions, async (request): Promise<EarthdataCatalogResponse> => {
+export const getEarthdataCatalog = onCall(async (request): Promise<EarthdataCatalogResponse> => {
   requireOwner(request);
   try { return await earthdataQueries.catalog(); }
   catch (error) { throw earthdataError(error, 'Earthdata catalog failed'); }
 });
 
-export const interpretEarthdata = onCall(earthdataCallableOptions, async (request): Promise<InterpretEarthdataResponse> => {
+export const interpretEarthdata = onCall(async (request): Promise<InterpretEarthdataResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(interpretEarthdataSchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
@@ -270,7 +261,7 @@ export const interpretEarthdata = onCall(earthdataCallableOptions, async (reques
   }
 });
 
-export const executeEarthdataQuery = onCall(earthdataExecuteOptions, async (request): Promise<EarthdataExecuteResponse> => {
+export const executeEarthdataQuery = onCall(async (request): Promise<EarthdataExecuteResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(earthdataExecuteSchema, request.data);
   await consumeQuota(db, ownerId, 'earthdataExecute');
@@ -278,24 +269,24 @@ export const executeEarthdataQuery = onCall(earthdataExecuteOptions, async (requ
   catch (error) { throw earthdataError(error, 'Earthdata query failed'); }
 });
 
-export const createAnalysis = onCall(callableOptions, async request => {
+export const createAnalysis = onCall(async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(createAnalysisSchema, request.data);
-  return repository.create(ownerId, input.spec, input.requestId);
+  const created = await repository.create(ownerId, input.spec, input.requestId);
+  // Start right away; the worker's sweep picks it up anyway if this process restarts first.
+  if (created.status === 'queued') analysisWorker.enqueue(created.analysisId);
+  return created;
 });
 
-export const getAnalysis = onCall(callableOptions, async (request): Promise<GetAnalysisResponse> => {
+export const getAnalysis = onCall(async (request): Promise<GetAnalysisResponse> => {
   const ownerId = requireOwner(request);
   const input = parseInput(getAnalysisSchema, request.data);
   await consumeQuota(db, ownerId, 'getAnalysis');
   return { analysis: await repository.get(ownerId, input.analysisId) };
 });
 
-export const processAnalysis = onDocumentCreated({
-  document: 'analysisJobs/{analysisId}', retry: true, timeoutSeconds: 540,
-  memory: '1GiB', concurrency: 2, secrets: [...processingSecrets, ...giovanniSecrets],
-}, async event => {
-  const analysisId = event.params.analysisId;
+/** One processing attempt. A failed attempt goes back to the queue and the worker retries it while attempts remain. */
+async function processAnalysis(analysisId: string): Promise<void> {
   const claim = await repository.claim(analysisId);
   if (!claim) return;
   try {
@@ -306,11 +297,11 @@ export const processAnalysis = onDocumentCreated({
   } catch {
     logger.error('Analysis processing failed', { analysisId, attempt: claim.job.attempts });
     await repository.release(analysisId, claim.token);
-    throw new Error('Analysis processing failed; it will be retried if attempts remain.');
   }
-});
+}
 
-// Balam: multi-source data (Meteomatics + NASA AppEEARS) preloaded into PostgreSQL. Independent of the callables above.
-export const balamIngest = onSchedule(balamIngestOptions, runBalamIngest);
-export const balamApi = onRequest(balamApiOptions, handleBalamApi);
-export const balamBackfill = onCall(balamBackfillOptions, runBalamBackfill);
+export const analysisWorker = new AnalysisWorker(() => repository.pending(), processAnalysis);
+
+// Balam: multi-source data (Meteomatics + NASA AppEEARS) preloaded into PostgreSQL. The HTTP API is mounted by the server
+// and the hourly ingestion runs as a separate cron job (scripts/run-ingest.ts).
+export const balamBackfill = onCall(runBalamBackfill);

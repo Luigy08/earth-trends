@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { HttpsError } from './http';
 import { isMeteomaticsParameter } from '../../shared/meteomatics-parameter.resolver';
 import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { EARTHDATA_LIMITS } from '../../shared/earthdata-catalog.constant';

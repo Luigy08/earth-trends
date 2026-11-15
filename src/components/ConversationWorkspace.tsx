@@ -32,7 +32,7 @@ export function ConversationWorkspace({ messages, proposal, busy, error, analysi
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
     <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={send} ariaLabel="Message the climate assistant" maxLength={1500} disabled={!sessionReady || busy} canSubmit={sessionReady && !busy && Boolean(input.trim())}
-        placeholder={sessionReady ? 'Ask about a place, a variable and a period…' : busy ? 'Connecting to your session…' : 'Session unavailable — check Firebase Functions'} tools={tools} actions={voice} />
+        placeholder={sessionReady ? 'Ask about a place, a variable and a period…' : busy ? 'Connecting to your session…' : 'Session unavailable — check the backend connection'} tools={tools} actions={voice} />
       {empty && <div className="chat-suggestions" aria-label="Example questions">{EXAMPLE_QUERIES.map(example => <Chip key={example.label} clickable variant="outlined" label={example.label} onClick={() => setInput(example.query)} />)}</div>}
       <span className="chat-disclaimer">{sessionReady ? 'Trends use one source per analysis: Meteomatics daily aggregates or NASA Giovanni (MERRA-2) monthly means. Review the interpretation before analyzing.' : busy ? 'Connecting to Firebase session…' : 'Session unavailable · deploy the session Cloud Functions and reload'}</span>
     </div>

@@ -1,4 +1,3 @@
-import { defineSecret } from 'firebase-functions/params';
 import type { ClimateMetric, Location } from '../../../shared/types';
 import { EARTHDATA_TOKEN_URL, GIOVANNI_ATTRIBUTION, GIOVANNI_DEFAULT_VARIABLE, GIOVANNI_TIME_SERIES_URL, GIOVANNI_UNIT_CONVERSIONS, GIOVANNI_VARIABLES } from '../../../shared/giovanni-catalog.constant';
 import { parseGiovanniCsv, resolveGiovanniConversion, resolveGiovanniMonthly } from '../../../shared/giovanni.resolver';
@@ -7,18 +6,14 @@ import { CONFIG } from '../config.constant';
 import { SourceError } from '../http';
 
 const PROVIDER = 'NASA Giovanni';
-export const earthdataUsername = CONFIG.useSecretManager ? defineSecret('EARTHDATA_USERNAME') : undefined;
-export const earthdataPassword = CONFIG.useSecretManager ? defineSecret('EARTHDATA_PASSWORD') : undefined;
-export const giovanniSecrets = earthdataUsername && earthdataPassword ? [earthdataUsername, earthdataPassword] : [];
-
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-/** Earthdata Login bearer token. Locally, EARTHDATA_TOKEN may be used directly instead of username/password. */
+/** Earthdata Login bearer token. EARTHDATA_TOKEN may be used directly instead of username/password. */
 async function earthdataToken(): Promise<string> {
-  if (!CONFIG.useSecretManager && process.env.EARTHDATA_TOKEN?.trim()) return process.env.EARTHDATA_TOKEN.trim();
+  if (process.env.EARTHDATA_TOKEN?.trim()) return process.env.EARTHDATA_TOKEN.trim();
   if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
-  const username = CONFIG.useSecretManager ? earthdataUsername?.value() : process.env.EARTHDATA_USERNAME;
-  const password = CONFIG.useSecretManager ? earthdataPassword?.value() : process.env.EARTHDATA_PASSWORD;
+  const username = process.env.EARTHDATA_USERNAME;
+  const password = process.env.EARTHDATA_PASSWORD;
   if (!username || !password) throw new SourceError(PROVIDER);
   try {
     const response = await fetch(EARTHDATA_TOKEN_URL, { method: 'POST', signal: AbortSignal.timeout(30_000),

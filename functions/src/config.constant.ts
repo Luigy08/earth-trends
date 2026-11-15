@@ -1,3 +1,5 @@
+import type { FunctionsErrorCode } from './backend.types';
+
 function positiveInteger(name: string, fallback: number): number {
   const value = process.env[name];
   if (!value) return fallback;
@@ -14,20 +16,28 @@ function booleanEnv(name: string, fallback: boolean): boolean {
   return value === 'true';
 }
 
+const PROJECT_ID = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'earth-trend-detective';
+
+/** Browsers may only call the server from the frontend. CORS is not access control: every endpoint also verifies the caller. */
+function corsOrigins(): string[] {
+  const configured = (process.env.CORS_ORIGINS ?? process.env.BALAM_CORS_ORIGINS ?? '').split(',').map(origin => origin.trim()).filter(Boolean);
+  if (configured.length) return configured;
+  const hosting = [`https://${PROJECT_ID}.web.app`, `https://${PROJECT_ID}.firebaseapp.com`];
+  return process.env.NODE_ENV === 'production' ? hosting : [...hosting, 'http://localhost:5173', 'http://localhost:5000'];
+}
+
 export const CONFIG = {
-  region: process.env.FUNCTIONS_REGION || 'us-central1',
-  projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'earth-trend-detective',
+  port: positiveInteger('PORT', 8787),
+  corsOrigins: corsOrigins(),
+  projectId: PROJECT_ID,
   vertexLocation: process.env.VERTEX_LOCATION || 'global',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-  // Production defaults to enforcement; only the local emulator defaults off.
   enforceAppCheck: booleanEnv('ENFORCE_APP_CHECK', false),
-  maxInstances: positiveInteger('MAX_INSTANCES', 1),
   globalDailyQuota: positiveInteger('QUOTA_GLOBAL_DAILY', 100),
   globalInterpretDailyQuota: positiveInteger('QUOTA_GLOBAL_INTERPRET_DAILY', 1000),
   globalSearchDailyQuota: positiveInteger('QUOTA_GLOBAL_SEARCH_DAILY', 2000),
   cacheTtlSeconds: positiveInteger('CACHE_TTL_SECONDS', 86400),
   currentWeather: booleanEnv('CURRENT_WEATHER_ENABLED', true),
-  useSecretManager: booleanEnv('METEOMATICS_USE_SECRET_MANAGER', process.env.FUNCTIONS_EMULATOR !== 'true'),
   quota: {
     interpretQuery: positiveInteger('QUOTA_INTERPRET_QUERY', 100),
     meteomaticsSuggestions: positiveInteger('QUOTA_METEOMATICS_SUGGESTIONS', 10),
@@ -48,3 +58,13 @@ export const MIN_COVERAGE = 0.8;
 export const METHODOLOGY_VERSION = '1.0.0-nw-calendar-lags';
 export const LEASE_MS = 600_000;
 export const MAX_ATTEMPTS = 3;
+/** Analyses processed at once by the in-process worker. The service runs as a single instance. */
+export const WORKER_CONCURRENCY = 2;
+/** How often the worker looks for queued analyses and expired leases, which is also the retry delay. */
+export const JOB_SWEEP_MS = 30_000;
+/** Largest request body. Saved chat sessions are the big ones; every other input is capped at 20 KB by `parseInput`. */
+export const MAX_BODY_BYTES = 10_000_000;
+export const HTTP_STATUS: Record<FunctionsErrorCode, number> = {
+  'invalid-argument': 400, 'failed-precondition': 400, unauthenticated: 401, 'permission-denied': 403, 'not-found': 404,
+  'already-exists': 409, 'resource-exhausted': 429, internal: 500, unavailable: 503,
+};

@@ -50,12 +50,12 @@ Use only the datasets listed in the challenge resources or explicitly approved b
 
 ## Architecture and project conventions
 
-- Frontend: React, Vite, TypeScript, MUI, Recharts, Leaflet. Backend: Firebase Functions v2 in `us-central1`, Firestore, anonymous Auth, App Check, Genkit/Vertex AI. Project ID: `earth-trend-detective`; verify current deployed state before operational changes.
-- Keep provider adapters independent. Meteomatics supplies historical aggregates and current weather through separate requests. Geocoding resolves explicit city/country matches; display the selected coordinates. Use Firebase Secret Manager for Meteomatics credentials. Never expose provider credentials in Vite variables, source control, browser logs, or chat.
-- Respect Firestore owner isolation, App Check, per-user/global quotas, server-side validation, caching, and bounded Function instances. Do not weaken these protections to make a demo pass.
+- Frontend: React, Vite, TypeScript, MUI, Recharts, Leaflet. Backend: one Node/Express service on Render (`render.yaml`) exposing `POST /api/<name>` endpoints, with Firestore, Firebase Auth token verification, optional App Check and Genkit/Vertex AI; no Cloud Functions. Project ID: `earth-trend-detective`; verify current deployed state before operational changes.
+- Keep provider adapters independent. Meteomatics supplies historical aggregates and current weather through separate requests. Geocoding resolves explicit city/country matches; display the selected coordinates. Keep Meteomatics and Earthdata credentials in the backend's secret environment variables (Render). Never expose provider credentials in Vite variables, source control, browser logs, or chat.
+- Respect Firestore owner isolation, App Check, per-user/global quotas, server-side validation, caching, and the single bounded backend instance. Do not weaken these protections to make a demo pass.
 - Follow repository `AGENTS.md`: SOLID, reuse shared components, inspect existing `.types.ts` before adding types, keep types/constants/styles/resolvers in their corresponding files where appropriate, prefer MUI, preserve existing function/variable names, and keep files below 1,000 lines when practical. Do not add or run tests unless the user asks; use other relevant validation such as type-check/build when needed.
 - User-facing site language is English by the user's request. Keep user-facing product copy, model prompts/results, error messages, metadata, CSV headings, accessible labels, and date/number formatting consistent.
-- This project has an explicit user request to host on Firebase. Deployment changes the public site; inspect the build and configuration and deploy only when it is part of the user's current request/authorization. Never claim a provider is connected until a real request has succeeded.
+- The web app is hosted on Firebase Hosting and, by the user's request, the backend on Render. Deployment changes the public site; inspect the build and configuration and deploy only when it is part of the user's current request/authorization. Never claim a provider is connected until a real request has succeeded.
 
 ## When working on a feature
 

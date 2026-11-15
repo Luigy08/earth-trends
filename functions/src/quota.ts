@@ -1,5 +1,5 @@
 import { Timestamp, type Firestore, type Transaction } from 'firebase-admin/firestore';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { HttpsError } from './http';
 import type { QuotaAction } from './backend.types';
 import { CONFIG } from './config.constant';
 import { hash } from './cache';

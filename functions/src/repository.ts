@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { HttpsError } from './http';
 import type { Analysis, AnalysisResult, AnalysisSpec, CreateAnalysisResponse } from '../../shared/types';
 import type { AnalysisJob, StoredAnalysis } from './backend.types';
 import { hash } from './cache';
@@ -38,6 +38,14 @@ export class AnalysisRepository {
     if (!data || data.ownerId !== ownerId) throw new HttpsError('not-found', 'Analysis not found.');
     const { specHash: _specHash, ...analysis } = data;
     return analysis;
+  }
+  /** Jobs a worker may claim now: queued ones and those whose lease expired without finishing. */
+  async pending(): Promise<string[]> {
+    const snapshot = await this.db.collection('analysisJobs').where('status', 'in', ['queued', 'processing']).get();
+    return snapshot.docs.filter(doc => {
+      const job = doc.data() as AnalysisJob;
+      return job.status === 'queued' || (job.leaseUntil ?? 0) <= Date.now();
+    }).map(doc => doc.id);
   }
   async claim(analysisId: string): Promise<{ job: AnalysisJob; token: string } | null> {
     const jobRef = this.db.collection('analysisJobs').doc(analysisId);

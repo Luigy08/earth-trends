@@ -1,10 +1,7 @@
-import type { Response } from 'express';
-import { getAppCheck } from 'firebase-admin/app-check';
-import { getAuth } from 'firebase-admin/auth';
+import type { Request, Response } from 'express';
 import { getFirestore } from 'firebase-admin/firestore';
-import { logger } from 'firebase-functions';
-import { HttpsError, type CallableRequest, type Request } from 'firebase-functions/v2/https';
-import { CONFIG } from '../config.constant';
+import { verifyAppCheck, verifyIdToken } from '../auth';
+import type { CallableRequest } from '../backend.types';
 import { loadAppeearsCatalog } from '../datasources/catalog/appeears-catalog';
 import { DataSourceRegistry } from '../datasources/registry';
 import { AppeearsSource } from '../datasources/sources/appeears';
@@ -15,21 +12,15 @@ import { PrismaJobStore } from '../db/prisma-job-store';
 import type { PlanSummary } from '../ingest/ingest.types';
 import { IngestService } from '../ingest/service';
 import { INGEST_TARGETS } from '../ingest/targets.constant';
+import { HttpsError } from '../http';
+import { logger } from '../logger';
 import { consumeQuota } from '../quota';
 import { parseInput } from '../validation';
 import { ApiError, handleBalamRequest } from './balam-api';
-import { BALAM, balamSecrets, databaseUrl, earthdataCredentials, meteomaticsCredentials } from './balam.constant';
+import { BALAM, databaseUrl, earthdataCredentials, meteomaticsCredentials } from './balam.constant';
 import { backfillSchema } from './balam.validation';
 
-export const balamIngestOptions = {
-  schedule: BALAM.schedule, timeZone: BALAM.timeZone, timeoutSeconds: 540, memory: '1GiB' as const,
-  // A failed run is simply picked up by the next one; retries would only duplicate source requests.
-  retryCount: 0, secrets: balamSecrets,
-};
-export const balamApiOptions = { cors: [...BALAM.corsOrigins], timeoutSeconds: 60, memory: '512MiB' as const, secrets: balamSecrets };
-export const balamBackfillOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSeconds: 300, memory: '1GiB' as const, secrets: balamSecrets };
-
-/* ---------- Per-instance wiring, created on first use inside an invocation ---------- */
+/* ---------- Per-process wiring, created on first use so a process that never touches PostgreSQL starts without it ---------- */
 
 let repository: PrismaBalamRepository | undefined;
 let registry: DataSourceRegistry | undefined;
@@ -53,7 +44,7 @@ export function getIngest(): IngestService {
   return ingest;
 }
 
-/* ---------- balamIngest (scheduled) ---------- */
+/* ---------- balamIngest (hourly cron job, see scripts/run-ingest.ts) ---------- */
 
 export async function runBalamIngest(): Promise<void> {
   const service = getIngest();
@@ -68,17 +59,16 @@ export async function runBalamIngest(): Promise<void> {
 /* ---------- balamApi (HTTP) ---------- */
 
 async function authenticate(request: Request): Promise<string> {
-  const unauthenticated = (message: string) => new ApiError(401, 'unauthenticated', message);
-  const token = /^Bearer (.+)$/i.exec(request.get('authorization') ?? '')?.[1];
-  if (!token) throw unauthenticated('Sign in to continue.');
-  if (CONFIG.enforceAppCheck) {
-    const appCheckToken = request.get('x-firebase-appcheck');
-    if (!appCheckToken) throw unauthenticated('App Check verification is required.');
-    await getAppCheck().verifyToken(appCheckToken).catch(() => { throw unauthenticated('App Check verification failed.'); });
+  try {
+    await verifyAppCheck(request.get('x-firebase-appcheck'));
+    const decoded = await verifyIdToken(request.get('authorization'));
+    if (!decoded) throw new HttpsError('unauthenticated', 'Sign in to continue.');
+    if (decoded.firebase?.sign_in_provider === 'anonymous') throw new HttpsError('unauthenticated', 'Sign in with Google to continue.');
+    return decoded.uid;
+  } catch (error) {
+    if (error instanceof HttpsError) throw new ApiError(401, 'unauthenticated', error.message);
+    throw error;
   }
-  const decoded = await getAuth().verifyIdToken(token).catch(() => { throw unauthenticated('Sign in to continue.'); });
-  if (decoded.firebase?.sign_in_provider === 'anonymous') throw unauthenticated('Sign in with Google to continue.');
-  return decoded.uid;
 }
 
 async function consumeQueryQuota(ownerId: string): Promise<void> {

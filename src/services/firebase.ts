@@ -1,35 +1,28 @@
 import { FirebaseError, initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
-import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteRequest, GiovanniExecuteResponse, GiovanniSessionState, InterpretGiovanniRequest, InterpretGiovanniResponse, QuerySessionWorkflow, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
 import type { EarthdataCatalogResponse, EarthdataExecuteRequest, EarthdataExecuteResponse, EarthdataSessionState, InterpretEarthdataRequest, InterpretEarthdataResponse } from '../../shared/types';
-import { ENV_KEYS } from '../app.constant';
+import { API_TIMEOUT_MS, ENV_KEYS } from '../app.constant';
 
 const env = import.meta.env;
 export const missingConfig = ENV_KEYS.filter(key => !env[key]);
 export const isConfigured = missingConfig.length === 0;
 let firebaseApp: FirebaseApp | undefined;
-let functions: ReturnType<typeof getFunctions> | undefined;
 
 function initialize() {
   if (!isConfigured) throw new Error('Configure Firebase to query live data.');
-  if (!firebaseApp || !functions) {
+  if (!firebaseApp) {
     firebaseApp = getApps()[0] ?? initializeApp({ apiKey: env.VITE_FIREBASE_API_KEY, authDomain: env.VITE_FIREBASE_AUTH_DOMAIN, projectId: env.VITE_FIREBASE_PROJECT_ID, appId: env.VITE_FIREBASE_APP_ID });
-    const auth = getAuth(firebaseApp);
-    functions = getFunctions(firebaseApp, env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1');
-    if (env.VITE_USE_FIREBASE_EMULATORS === 'true') {
-      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-      connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-    }
+    if (env.VITE_USE_FIREBASE_EMULATORS === 'true') connectAuthEmulator(getAuth(firebaseApp), 'http://127.0.0.1:9099', { disableWarnings: true });
   }
-  return { auth: getAuth(firebaseApp), functions };
+  return { auth: getAuth(firebaseApp) };
 }
 
-async function connect() {
-  const { auth, functions: client } = initialize();
+async function connect(): Promise<User> {
+  const { auth } = initialize();
   await auth.authStateReady();
   if (!auth.currentUser || auth.currentUser.isAnonymous) throw new Error('Sign in with Google to continue.');
-  return client;
+  return auth.currentUser;
 }
 
 export const watchAuthUser = (onChange: (user: User | null) => void) => onAuthStateChanged(initialize().auth, user => onChange(user && !user.isAnonymous ? user : null));
@@ -47,9 +40,24 @@ export async function signInWithGoogle() {
 
 export const signOutUser = () => signOut(initialize().auth);
 
+/** Calls `POST /api/<name>` on the backend. Failures keep the `functions/<code>` codes the views already read. */
 async function call<Request, Response>(name: string, data: Request): Promise<Response> {
-  const client = await connect();
-  return (await httpsCallable<Request, Response>(client, name, { timeout: 120000 })(data)).data;
+  const user = await connect();
+  let response: globalThis.Response;
+  try {
+    response = await fetch(`${String(env.VITE_API_BASE_URL).replace(/\/+$/, '')}/api/${name}`, {
+      method: 'POST', signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+      body: JSON.stringify({ data }),
+    });
+  } catch {
+    throw new FirebaseError('functions/unavailable', 'The service is unavailable. Please try again.');
+  }
+  const body = await response.json().catch(() => null) as { result?: Response; error?: { code?: string; message?: string } } | null;
+  if (!response.ok || !body || body.error) {
+    throw new FirebaseError(`functions/${body?.error?.code ?? 'internal'}`, body?.error?.message ?? 'The request could not be completed.');
+  }
+  return body.result as Response;
 }
 
 export const interpretQuery = (data: InterpretQueryRequest) => call<InterpretQueryRequest, InterpretQueryResponse>('interpretQuery', data);

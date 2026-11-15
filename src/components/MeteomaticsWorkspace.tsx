@@ -14,7 +14,7 @@ const errorText = (cause: unknown) => {
   const code = cause !== null && typeof cause === 'object' && 'code' in cause ? String(cause.code) : '';
   if (/Meteomatics credentials are not configured/i.test(cause instanceof Error ? cause.message : '')) return 'Meteomatics credentials are not configured on the server.';
   if (/functions\/internal|internal \[0\]/i.test(`${code} ${cause instanceof Error ? cause.message : ''}`)) {
-    return 'The Meteomatics API Functions are not available in this Firebase project or region. Deploy getMeteomaticsCatalog, interpretMeteomatics, checkMeteomaticsAvailability, and executeMeteomaticsQuery.';
+    return 'The Meteomatics endpoints are not available on the backend. Check that the server is running the current version.';
   }
   if (/functions\/unavailable|network/i.test(`${code} ${cause instanceof Error ? cause.message : ''}`)) {
     return cause instanceof Error && cause.message && cause.message !== 'unavailable' ? cause.message : 'Could not reach the service. Please try again.';

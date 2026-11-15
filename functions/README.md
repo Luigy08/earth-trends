@@ -1,12 +1,16 @@
 # Earth Trend Detective backend
 
-TypeScript / Node 22, Firebase Functions v2, Firestore queue, Genkit with Vertex AI. Deployment belongs to the parent project; no deployment is performed by this package.
+TypeScript / Node 22, an Express HTTP server (deployed as one Render web service, see `../render.yaml`), Firestore queue, Genkit with Vertex AI. Firebase is still used for Auth token verification and Firestore through `firebase-admin`; there are no Cloud Functions. Deployment belongs to the parent project; no deployment is performed by this package.
+
+## Server
+
+`src/server.ts` is the entry point (`npm start`; `npm run dev` builds and loads the ignored `.env.local`). Every handler exported from `src/index.ts` through `onCall` is served as `POST /api/<name>` with body `{ "data": ... }` and an `Authorization: Bearer <Firebase ID token>` header. It answers `{ "result": ... }`, or `{ "error": { "code", "message" } }` with the matching HTTP status; codes are the former callable codes (`unauthenticated`, `invalid-argument`, `resource-exhausted`, `unavailable`, …) and the frontend reads them as `functions/<code>`. `GET /healthz` is the health check and the Balam HTTP API is mounted under `/balam`. CORS allows only `CORS_ORIGINS` (default: the two Firebase Hosting domains, plus localhost outside production); it is not access control, every endpoint verifies the caller.
 
 ## Contract
 
-`../shared/types.ts` is the public frontend contract. `npm run build` emits `lib/functions/src/index.js` and `lib/shared/types.js` / `.d.ts`; Firebase packages the complete runtime inside `functions/`. The frontend imports source types with `import type`.
+`../shared/types.ts` is the public frontend contract. `npm run build` emits `lib/functions/src/server.js` and `lib/shared/types.js` / `.d.ts`. The frontend imports source types with `import type`.
 
-All callables require Google Firebase Authentication. App Check enforcement is disabled for this test project with `ENFORCE_APP_CHECK=false`. Invalid boolean values fail function discovery.
+All callables require Google Firebase Authentication. App Check enforcement is disabled for this test project with `ENFORCE_APP_CHECK=false`; when enabled, every request must carry a valid `X-Firebase-AppCheck` token. Invalid boolean values stop the server at startup.
 
 | Callable | Input | Output |
 | --- | --- | --- |
@@ -25,13 +29,13 @@ Interpretation asks clarification for missing fields, ambiguous locations, unsup
 
 ## Processing and access
 
-`createAnalysis` atomically reserves quota and creates `analyses/{id}` and `analysisJobs/{id}`. `processAnalysis` listens with `onDocumentCreated`, enabled event retries, a 540-second timeout and a 600-second lease. Transactional lease tokens fence duplicate/stale workers. A busy duplicate throws so delivery is retried rather than losing work. Expired leases are reclaimable. Unexpected processing errors release the lease and retry up to three processing attempts. Scientific source/quality failures are terminal reportable outcomes rather than internal exceptions.
+`createAnalysis` atomically reserves quota and creates `analyses/{id}` and `analysisJobs/{id}`. An in-process worker (`analysis-worker.ts`) starts the job right after creation and sweeps `analysisJobs` every 30 seconds for queued jobs and expired leases, so work survives a restart or deploy. The lease lasts 600 seconds. Transactional lease tokens fence duplicate/stale workers; a job with a live lease is never claimed twice. Expired leases are reclaimable. Unexpected processing errors release the lease and retry up to three processing attempts. Scientific source/quality failures are terminal reportable outcomes rather than internal exceptions.
 
 Analysis states: `queued`, `processing`, `completed`, `insufficient_data`, `source_unavailable`, `failed`. `result.outcome` is `sufficient_data`, `insufficient_data` or `source_unavailable`. Scientific outcomes contain available descriptive data, quality warnings and `trend: null` when inference is invalid. `failed` is reserved for exhausted unexpected failures. The client may poll `getAnalysis` until any terminal state; use backoff to respect read quotas.
 
-The parent must deploy Firestore rules denying all client access to `analysisJobs`, `quotas` and `serverCache`, and all writes to `analyses`. Owner-only analysis reads may be allowed; callable reads also check owner identity and return not-found for other users. Admin code uses the runtime identity, never trusts an owner ID in request input. The default Gen2 compute runtime identity needs Firestore access, Vertex AI User and access to the optional secrets. No service account credentials belong in the repo.
+The parent must deploy Firestore rules denying all client access to `analysisJobs`, `quotas` and `serverCache`, and all writes to `analyses`. Owner-only analysis reads may be allowed; callable reads also check owner identity and return not-found for other users. Admin code uses the runtime identity, never trusts an owner ID in request input. The server runs as a dedicated Google service account, supplied to the host as a secret file through `GOOGLE_APPLICATION_CREDENTIALS`; it needs only Cloud Datastore User and Vertex AI User (plus Firebase App Check Token Verifier when enforcement is on). No service account credentials belong in the repo.
 
-Per-user transactional quotas default to **10 new analyses per UTC hour**; interpretation 20, search 100 and reads 1000 per UTC day. Global UTC daily budgets are independent: **100 new analyses**, 200 interpretations and 2000 searches. Search and interpretation never spend the analysis budget; reads are excluded from global budgets. Cache hits still consume their respective endpoint budget. Idempotent creation retries consume no quota. Configure the `QUOTA_*` environment settings before deployment. Input validation caps callable JSON at 20 KB before Zod walks arrays. `MAX_INSTANCES` defaults to 2 per function; worker concurrency is 2.
+Per-user transactional quotas default to **10 new analyses per UTC hour**; interpretation 20, search 100 and reads 1000 per UTC day. Global UTC daily budgets are independent: **100 new analyses**, 200 interpretations and 2000 searches. Search and interpretation never spend the analysis budget; reads are excluded from global budgets. Cache hits still consume their respective endpoint budget. Idempotent creation retries consume no quota. Configure the `QUOTA_*` environment settings before deployment. Input validation caps callable JSON at 20 KB before Zod walks arrays. The service runs as a single instance (`numInstances: 1` in `render.yaml`); worker concurrency is 2.
 
 ## Data and inference
 
@@ -52,18 +56,20 @@ The chat has a separate Meteomatics REST workflow. Its catalog is a versioned sn
 
 The chat also has a NASA Giovanni workflow with the same steps: `getGiovanniCatalog` returns the curated variables in `shared/giovanni-catalog.constant.ts`, `interpretGiovanni` (Gemini, quota `interpretQuery`) proposes one to five catalog variables, a geocoded point and a UTC date range, and `executeGiovanniQuery` (requires `confirmed: true`, quota `giovanniExecute`, Earthdata secrets) calls the Giovanni time series service once per variable. Results are raw provider values in the Meteomatics JSON envelope with the unit Giovanni reports; fill values become null. Chart trends average complete months/years and infer only above the POC coverage threshold. Whether Giovanni serves a catalog ID is decided by the service; a refusal is reported as unavailable. Results are never fed into trend analysis.
 
-For local development, the ignored `functions/.env.local` can contain `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD`; the emulator defaults to `METEOMATICS_USE_SECRET_MANAGER=false`. Never upload a local credential file as a production environment file.
+For local development, the ignored `functions/.env.local` can contain `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD`; `npm run dev` loads that file. Never upload a local credential file as a production environment file.
 
-For production, create Secret Manager secrets using Firebase CLI `functions:secrets:set METEOMATICS_USERNAME` and `functions:secrets:set METEOMATICS_PASSWORD`. Secret Manager is the production default. `processAnalysis`, `checkMeteomaticsAvailability` and `executeMeteomaticsQuery` bind these secrets. `processAnalysis` also binds `EARTHDATA_USERNAME` and `EARTHDATA_PASSWORD` for Giovanni; both secrets must exist before deploying (`node scripts/configure-meteomatics.mjs <account> earthdata`). Updating secret versions requires redeploying the bound functions. Emulator Secret Manager overrides belong in ignored `.secret.local`.
+In production the credentials are secret environment variables of the Render services: `METEOMATICS_USERNAME`, `METEOMATICS_PASSWORD`, `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD` and `DATABASE_URL` (`sync: false` in `render.yaml`, so their values never live in the repo). Changing one restarts the service.
 
-Historical trend retrieval fetches daily aggregates one year per request and converts only complete months into the analysis series. An eligible historical-data subscription is required; coverage varies by account and source, and slow requests can approach the worker time limit.
+Historical trend retrieval fetches daily aggregates one year per request and converts only complete months into the analysis series. An eligible historical-data subscription is required; coverage varies by account and source, and a slow analysis that outlives its lease is retried.
 
 ## Caching, configuration and checks
 
 `serverCache` stores provider data (default TTL 24 hours), geocoding (7 days) and current weather (15 minutes). Cache keys include coordinates, requested range, parameter/provider version, or query/count as appropriate. The original retrieval timestamp is preserved on cache hits. Reads enforce expiry even without Firestore TTL cleanup. Optional Firestore TTL policies on `serverCache.expiresAt` and `quotas.expiresAt` reclaim storage; expired entries do not bypass quotas. Cache failures do not prevent analysis. Cache documents must remain server-only.
 
-Copy configuration names from `.env.example`, with production values owned by the parent. Defaults: project `earth-trend-detective`, function region `us-central1`, Vertex location `global`, configurable model `gemini-3.8-flash`. Vertex uses Application Default Credentials; no Gemini API key is needed. Set model and location together for supported regional/global models.
+Copy configuration names from `.env.example`, with production values owned by the parent. Defaults: project `earth-trend-detective`, Vertex location `global`, configurable model `gemini-3.8-flash`. Vertex uses Application Default Credentials; no Gemini API key is needed. Set model and location together for supported regional/global models.
+
+To exercise the server locally without production data, start `firebase emulators:start --only auth,firestore` and run it with `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080` and `FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099`; no Google credentials are needed then, but Gemini calls report unavailable.
 
 Run `npm run build`, `npm run typecheck`, and `npm test`. Tests use the built-in Node test runner, not Vitest, and mocked external APIs. They do not contact production or deploy infrastructure. Live Vertex/provider checks and deployed Auth/App Check/Firestore IAM verification belong to the parent's environment.
 
-Provider references: [Genkit Vertex integration](https://genkit.dev/docs/js/integrations/vertex-ai/), [Firebase Firestore event semantics](https://firebase.google.com/docs/functions/firestore-events), [Meteomatics API](https://www.meteomatics.com/en/api/getting-started/), [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).
+Provider references: [Genkit Vertex integration](https://genkit.dev/docs/js/integrations/vertex-ai/), [Render Blueprints](https://render.com/docs/blueprint-spec), [Meteomatics API](https://www.meteomatics.com/en/api/getting-started/), [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api).

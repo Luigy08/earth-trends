@@ -15,7 +15,7 @@ const errorText = (cause: unknown) => {
   const code = cause !== null && typeof cause === 'object' && 'code' in cause ? String(cause.code) : '';
   const message = cause instanceof Error ? cause.message : '';
   if (/functions\/internal|functions\/not-found|internal \[0\]/i.test(`${code} ${message}`)) {
-    return 'The Giovanni Functions are not available in this Firebase project or region. Deploy getGiovanniCatalog, interpretGiovanni, and executeGiovanniQuery.';
+    return 'The Giovanni endpoints are not available on the backend. Check that the server is running the current version.';
   }
   return message && message !== 'unavailable' ? message : 'NASA Giovanni is unavailable. Please try again.';
 };

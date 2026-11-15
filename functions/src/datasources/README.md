@@ -5,7 +5,7 @@ Multi-source layer for Earth Trend Detective. It keeps the Meteomatics query mod
 It runs beside the existing callables and never feeds them: the on-demand analysis (`createAnalysis` / `processAnalysis`) and the Meteomatics chat are unchanged, and values from different providers are never spliced into one series.
 
 ```
-balamIngest (hourly, at :15)
+balamIngest (hourly cron job, at :15)
   process()  poll requests in flight → Observation rows → Trend per zone
   plan()     submit the next missing range of every target
                     │
@@ -53,11 +53,11 @@ functions/
   src/scripts/                                sync-appeears-catalog, seed-zones
 ```
 
-The new exports in `src/index.ts` are `balamIngest`, `balamApi` and `balamBackfill`.
+`balamIngest` runs as a cron job (`scripts/run-ingest.ts`, `npm run ingest`), `balamApi` is mounted by the server under `/balam`, and `balamBackfill` is `POST /api/balamBackfill`.
 
 ## Setup
 
-Local values go in the ignored `functions/.env.local` (see `.env.example`); production uses Secret Manager.
+Local values go in the ignored `functions/.env.local` (see `.env.example`); production uses the secret environment variables of the Render services.
 
 | Name | Used for |
 |---|---|
@@ -88,7 +88,7 @@ Targets are in `src/ingest/targets.constant.ts`: the 18 departments × land surf
 
 Conventions worth knowing:
 
-- `balamIngest` runs every hour (`BALAM_INGEST_SCHEDULE`), so a block NASA has finished is stored within the hour and the next one is requested right away; a range requested in the last 20 hours is still never requested twice.
+- `balamIngest` runs every hour (the cron schedule in `render.yaml`), so a block NASA has finished is stored within the hour and the next one is requested right away; a range requested in the last 20 hours is still never requested twice.
 - `Observation.date` is the product date for AppEEARS. For Meteomatics it is the **local Honduran date on which the 24-hour window starts**: the free plan only serves the last 24 h, so a run averages the 24 hourly values ending at the current hour. The 23:15 local run therefore stores the whole local day (00:00 → 23:00), and later runs skip a date that is already stored. `count` is then the number of hourly samples, and a day with fewer than 18 valid hours has a null value.
 - Sources that answer several samples per day are averaged into one daily row (`median`/`std` stay null). A single sample per day keeps the area statistics from AppEEARS (`min`, `max`, `median`, `std`, pixel `count`).
 - Missing values are stored as null and are never imputed.
@@ -147,16 +147,14 @@ Prefer one variable at a time: all targets together mean about 30 AppEEARS area 
 
 ## Migrating and deploying
 
-Nothing here deploys by itself. With the database created and the secrets at hand:
+Nothing here deploys by itself. With the database created:
 
 ```bash
-firebase functions:secrets:set DATABASE_URL --project earth-trend-detective      # pooled URL
 npm --prefix functions run migrate:deploy                                        # with DIRECT_URL in functions/.env.local
 npm --prefix functions run seed:zones
-firebase deploy --only functions --project earth-trend-detective
 ```
 
-`DATABASE_URL` must exist before any functions deploy, because the new functions bind it; the Earthdata and Meteomatics secrets are the ones the project already has.
+Then set `DATABASE_URL` (pooled URL) and the Earthdata and Meteomatics credentials on both Render services, the API and the ingestion cron job (`../../../render.yaml`).
 
 ## Still to validate with real credentials
 
@@ -168,4 +166,4 @@ The adapters are tested against simulated responses that follow the official doc
 - AppEEARS accepts the 18-feature collection and 5-year blocks, and whether SPL4SMGP statistics arrive daily or 3-hourly (both are handled).
 - Whether the statistics exclude the MOD16A2GF special classes (32761–32767) as well as the fill value.
 - The Meteomatics plan serves 24 hourly values for 18 points in one request.
-- CORS in production: the emulator allows every origin by design.
+- CORS in production: only the origins in `CORS_ORIGINS` are allowed.

@@ -1,3 +1,12 @@
+import type { FunctionsErrorCode } from './backend.types';
+
+/** An error the client may see. Anything else thrown by a handler is reported as `internal`. */
+export class HttpsError extends Error {
+  constructor(public readonly code: FunctionsErrorCode, message: string, public readonly details?: unknown) {
+    super(message);
+  }
+}
+
 export class SourceError extends Error {
   constructor(public readonly provider: string, public readonly retryable = false) {
     super(`${provider} is unavailable`);

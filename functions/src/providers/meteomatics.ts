@@ -1,4 +1,3 @@
-import { defineSecret } from 'firebase-functions/params';
 import { z } from 'zod';
 import type { ClimateMetric, Location } from '../../../shared/types';
 import type { CacheStore, ClimateProvider, ClimateSeries } from '../backend.types';
@@ -6,13 +5,10 @@ import { CONFIG } from '../config.constant';
 import { fetchJson, SourceError } from '../http';
 import { daysInMonth } from '../statistics';
 
-export const meteomaticsUsername = CONFIG.useSecretManager ? defineSecret('METEOMATICS_USERNAME') : undefined;
-export const meteomaticsPassword = CONFIG.useSecretManager ? defineSecret('METEOMATICS_PASSWORD') : undefined;
-export const processingSecrets = meteomaticsUsername && meteomaticsPassword ? [meteomaticsUsername, meteomaticsPassword] : [];
-
+/** Credentials come from the server environment only (Render secrets or the ignored local env file). */
 export function meteomaticsHeaders(): Record<string, string> | null {
-  const username = CONFIG.useSecretManager ? meteomaticsUsername?.value() : process.env.METEOMATICS_USERNAME;
-  const password = CONFIG.useSecretManager ? meteomaticsPassword?.value() : process.env.METEOMATICS_PASSWORD;
+  const username = process.env.METEOMATICS_USERNAME;
+  const password = process.env.METEOMATICS_PASSWORD;
   return username && password ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` } : null;
 }
 

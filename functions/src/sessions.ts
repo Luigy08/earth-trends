@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Firestore } from 'firebase-admin/firestore';
-import { HttpsError } from 'firebase-functions/v2/https';
+import { HttpsError } from './http';
 import type { Analysis, ConversationMessage, ConversationSession, AnalysisSpec } from '../../shared/types';
 
 interface StoredSession extends ConversationSession { ownerId: string }

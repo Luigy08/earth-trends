@@ -130,14 +130,14 @@ export async function resolveInterpretation(intent: ParsedIntent, locations: Loc
     if (!clarificationQuestions.length) clarificationQuestions.push('Specify the variable, location, and time period you want to analyze.');
     return { ...base, status: 'needs_clarification' };
   }
-  const matches = await Promise.all(intent.locationQueries.map(query => locations.search(query, 3)));
+  const matches = await Promise.all(intent.locationQueries.map(query => locations.resolve(query)));
   for (let i = 0; i < matches.length; i++) {
-    const rows = matches[i]!;
-    if (rows.length === 0) clarificationQuestions.push(`We could not find “${intent.locationQueries[i]}”. Specify a city and country.`);
-    else if (rows.length > 1) clarificationQuestions.push(`“${intent.locationQueries[i]}” has multiple matches: ${rows.map(r => `${r.name} (${r.country ?? 'country not specified'})`).join('; ')}. Please specify the location.`);
+    const { match, candidates } = matches[i]!;
+    if (!candidates.length) clarificationQuestions.push(`We could not find “${intent.locationQueries[i]}”. Specify a city and country.`);
+    else if (!match) clarificationQuestions.push(`“${intent.locationQueries[i]}” has multiple matches: ${candidates.map(r => `${r.name} (${r.country ?? 'country not specified'})`).join('; ')}. Please specify the location.`);
   }
   if (clarificationQuestions.length) return { ...base, status: 'needs_clarification' };
-  const spec: AnalysisSpec = { metric: intent.metric, locations: matches.map(rows => rows[0]!),
+  const spec: AnalysisSpec = { metric: intent.metric, locations: matches.map(({ match }) => match!),
     startYear: intent.startYear, endYear: intent.endYear, comparisonMode: intent.comparisonMode,
     ...(intent.secondPeriod ? { secondPeriod: intent.secondPeriod } : {}),
   };
@@ -171,6 +171,13 @@ function catalogCandidates(query: string): string[] {
   return ranked.map(({ parameter, description }) => `${parameter} — ${description}`);
 }
 
+/** Geocodes a chat place to a point, or returns the question to ask when the place is unclear. */
+async function locatePoint(locationQuery: string, locations: LocationSearch): Promise<{ point: { latitude: number; longitude: number } | null; locationLabel?: string; question?: string }> {
+  const { match, candidates } = await locations.resolve(locationQuery);
+  if (match) return { point: { latitude: match.latitude, longitude: match.longitude }, locationLabel: `${match.name}${match.country ? `, ${match.country}` : ''}` };
+  return { point: null, question: candidates.length ? `Which place did you mean: ${candidates.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${locationQuery}. Could you add the region or a nearby city?` };
+}
+
 export async function interpretMeteomaticsQuery(query: string, locations: LocationSearch): Promise<InterpretMeteomaticsResponse> {
   const response = await getAi().generate({
     model: vertexAI.model(CONFIG.geminiModel), config: { temperature: 0, maxOutputTokens: 3072 },
@@ -185,16 +192,10 @@ export async function interpretMeteomaticsQuery(query: string, locations: Locati
   if (sourceIssue) { value.ready = false; clarificationQuestions.push(sourceIssue); }
   let locationLabel: string | undefined;
   if (value.mode === 'point' && value.locationQuery) {
-    const matches = await locations.search(value.locationQuery, 3);
-    value.point = null;
-    if (matches.length === 1) {
-      const match = matches[0]!;
-      value.point = { latitude: match.latitude, longitude: match.longitude };
-      locationLabel = `${match.name}${match.country ? `, ${match.country}` : ''}`;
-    } else {
-      value.ready = false;
-      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${value.locationQuery}. Could you add the region or a nearby city?`);
-    }
+    const place = await locatePoint(value.locationQuery, locations);
+    value.point = place.point;
+    locationLabel = place.locationLabel;
+    if (place.question) { value.ready = false; clarificationQuestions.push(place.question); }
   }
   const metadata = { suggestions: value.suggestions.slice(0, 3), ...(locationLabel ? { locationLabel } : {}) };
   if ((value.ready || clarificationQuestions.length === 0) && value.mode && value.source && value.parameters.length && value.validDates && value.format) {
@@ -237,16 +238,10 @@ export async function interpretGiovanniQuery(query: string, locations: LocationS
   let locationLabel: string | undefined;
   let point = value.point;
   if (value.locationQuery) {
-    const matches = await locations.search(value.locationQuery, 3);
-    point = null;
-    if (matches.length === 1) {
-      const match = matches[0]!;
-      point = { latitude: match.latitude, longitude: match.longitude };
-      locationLabel = `${match.name}${match.country ? `, ${match.country}` : ''}`;
-    } else {
-      value.ready = false;
-      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${value.locationQuery}. Could you add the region or a nearby city?`);
-    }
+    const place = await locatePoint(value.locationQuery, locations);
+    point = place.point;
+    locationLabel = place.locationLabel;
+    if (place.question) { value.ready = false; clarificationQuestions.push(place.question); }
   }
   const withLabel = { ...metadata, ...(locationLabel ? { locationLabel } : {}) };
   if ((value.ready || clarificationQuestions.length === 0) && value.variables.length && point && value.startDate && value.endDate) {

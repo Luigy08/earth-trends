@@ -47,3 +47,5 @@ export const MIN_COVERAGE = 0.8;
 export const METHODOLOGY_VERSION = '1.0.0-nw-calendar-lags';
 export const LEASE_MS = 600_000;
 export const MAX_ATTEMPTS = 3;
+/** A same-named place is chosen automatically only when it has at least this many times the population of the next one. */
+export const PLACE_DOMINANCE_RATIO = 10;

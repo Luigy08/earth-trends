@@ -33,3 +33,8 @@ export interface ParsedIntent {
   summary: string;
   clarificationQuestions: string[];
 }
+
+/** A geocoder match plus the fields used to choose between same-named places. */
+export interface PlaceCandidate { location: Location; placeName: string; population: number }
+/** Outcome of resolving a typed place: one chosen location, or the candidates to ask about. */
+export interface PlaceResolution { match?: Location; candidates: Location[] }

@@ -1,3 +1,5 @@
+import { COLORS } from './theme.constant';
+
 export const MAX_YEAR = new Date().getFullYear() - 1;
 export const EXAMPLE_QUERIES = [
   { label: 'Is my city getting warmer?', query: `How has the temperature changed in Tegucigalpa between 2000 and ${MAX_YEAR}?` },
@@ -6,8 +8,9 @@ export const EXAMPLE_QUERIES = [
 ];
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-export const SERIES_COLORS = ['#295846', '#d7754e'];
+export const SERIES_COLORS = [COLORS.green700, COLORS.accent];
 export const CHART_VIEWS = [{ value: 'annual', label: 'Annual' }, { value: 'monthly', label: 'Monthly' }, { value: 'anomaly', label: 'Anomalies' }] as const;
+export const WORKFLOW_OPTIONS = [{ value: 'meteomatics', label: 'Meteomatics data', description: 'Raw values from the Meteomatics Weather API' }, { value: 'trend', label: 'Trend analysis', description: 'Historical trends with statistical significance' }] as const;
 export const ENV_KEYS = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID', 'VITE_FIREBASE_APPCHECK_SITE_KEY'] as const;
 export const AUTH_ERROR_MESSAGES: Record<string, string> = {
   'auth/popup-closed-by-user': '',

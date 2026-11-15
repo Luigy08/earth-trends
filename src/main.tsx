@@ -7,6 +7,8 @@ import './global.styles.css';
 import './summary.styles.css';
 import './conversation.styles.css';
 import './auth.styles.css';
+import './chat.styles.css';
+import './bento.styles.css';
 import 'leaflet/dist/leaflet.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

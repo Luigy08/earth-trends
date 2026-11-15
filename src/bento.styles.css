@@ -1,0 +1,39 @@
+/* Bento grid for trend results: the verdict leads, metrics sit beside it, evidence and provenance follow. */
+.results-bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+.results-bento > .bento-tile { grid-column: span 12; min-width: 0; margin: 0; border: 1px solid var(--color-line-100); border-radius: 18px; background: var(--color-paper); animation: bento-in .6s cubic-bezier(.2, .7, .2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
+.results-bento > .bento-verdict { grid-column: span 8; align-items: flex-start; background: var(--color-line-50); border-color: var(--color-line-200); }
+.results-bento > .bento-feature { grid-column: span 4; display: flex; flex-direction: column; justify-content: space-between; background: var(--color-green-800); border-color: var(--color-green-800); color: var(--color-paper); }
+.results-bento > .bento-feature .metric-label, .results-bento > .bento-feature > p { color: color-mix(in srgb, var(--color-paper) 75%, transparent); }
+.results-bento > .bento-feature .metric-value { font-size: 44px; color: var(--color-paper); }
+.results-bento > .bento-feature .metric-value small, .results-bento > .bento-feature .metric-location { color: color-mix(in srgb, var(--color-paper) 75%, transparent) !important; }
+.results-bento > .bento-metric { grid-column: span 4; }
+.results-bento > .bento-chart { grid-column: span 8; }
+.results-bento > .bento-map { grid-column: span 4; display: flex; flex-direction: column; }
+.results-bento > .bento-map .map-wrap { flex: 1; }
+.results-bento > .bento-map .location-map { height: 100%; min-height: 277px; }
+.results-bento > .bento-wide .numeric-summary { margin: 0; border: 0; border-radius: inherit; background: transparent; }
+.results-bento > .source-details { padding: 22px; }
+.results-bento .metric-card { padding: 20px; }
+
+@keyframes bento-in {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 1100px) {
+  .results-bento > .bento-verdict, .results-bento > .bento-chart, .results-bento > .bento-map { grid-column: span 12; }
+  .results-bento > .bento-feature { grid-column: span 12; }
+  .results-bento > .bento-map .location-map { height: 260px; }
+}
+@media (max-width: 600px) {
+  .results-bento { gap: 10px; }
+  .results-bento > .bento-metric { grid-column: span 6; }
+  .results-bento > .bento-coverage { grid-column: span 12; }
+  .results-bento > .bento-feature .metric-value { font-size: 36px; }
+  .results-bento > .bento-tile { border-radius: 14px; }
+}
+@media print {
+  .results-bento { display: block; }
+  .results-bento > .bento-tile { margin-bottom: 12px; animation: none !important; }
+  .results-bento > .bento-feature, .results-bento > .bento-feature * { background: var(--color-paper); color: var(--color-ink) !important; }
+}

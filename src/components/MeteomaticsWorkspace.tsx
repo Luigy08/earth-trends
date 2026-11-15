@@ -1,10 +1,12 @@
 import ReactMarkdown from 'react-markdown';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Autocomplete, Button, Chip, CircularProgress, Collapse, MenuItem, TextField } from '@mui/material';
-import { CheckCircleOutline, ExpandMore, Send } from '@mui/icons-material';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Alert, Autocomplete, Badge, Button, Chip, CircularProgress, Collapse, IconButton, MenuItem, Popover, TextField, Tooltip } from '@mui/material';
+import { CheckCircleOutline, ExpandMore, TuneOutlined } from '@mui/icons-material';
 import type { MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, MeteomaticsQuerySpec, MeteomaticsSessionState, ConversationSession } from '../../shared/types';
 import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestions, interpretMeteomatics, getMeteomaticsSession, saveMeteomaticsSession } from '../services/firebase';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
+import { ChatComposer, ChatGreeting } from './ChatComposer';
+import { DictationButton } from './DictationButton';
 
 type ChatLine = { role: 'user' | 'assistant'; content: string };
 const errorText = (cause: unknown) => {
@@ -19,7 +21,9 @@ const errorText = (cause: unknown) => {
   return cause instanceof Error ? cause.message : 'The Meteomatics service is unavailable.';
 };
 
-export function MeteomaticsWorkspace({ sessionId, onSessionUpdated }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void }) {
+export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
+  const threadEnd = useRef<HTMLDivElement>(null);
+  const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
   const [loaded, setLoaded] = useState(false);
   const saveQueue = useRef(Promise.resolve());
   const updatedCallback = useRef(onSessionUpdated);
@@ -111,16 +115,20 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated }: { sessionI
     finally { setBusy(false); }
   };
 
-  return <section className="meteo-workspace" aria-label="Meteomatics query assistant">
-    <div className="conversation-heading"><div><span className="eyebrow">METEOMATICS WEATHER API</span><h2>Build a data request.</h2></div><span className="assistant-status"><i />API assistant</span></div>
-    <p className="meteo-intro">Tell me what you want to explore. I’ll collect the details, find your location, and help you review the request before you submit it.</p>
-    {catalogError && <Alert severity="warning" sx={{ mb: 1 }}>The parameter catalog could not be loaded: {catalogError}</Alert>}
-    <details><summary>Optional: browse weather variables</summary><Autocomplete multiple options={options} groupBy={option => option.domain} value={options.filter(option => selectedParameters.includes(option.parameter))}
-      getOptionLabel={option => option.parameter} loading={catalogBusy} onChange={(_, selected) => setSelectedParameters(selected.slice(0, 10).map(option => option.parameter))}
-      renderInput={params => <TextField {...params} label="Browse weather variables and parameter families" placeholder="Parameter code or name" helperText={catalog ? `${catalog.parameters.length} parameters · catalog ${catalog.version}` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
-      renderOption={(props, option) => <li {...props} key={option.parameter}><span><strong>{option.parameter}</strong><br />{option.description}</span></li>} sx={{ mb: 2 }} /></details>
-    <div className="meteo-transcript" aria-live="polite">
-      {!messages.length && <div className="assistant-message"><span className="assistant-mark">✳</span><div><strong>What Meteomatics data do you need?</strong><p>Tell me which weather conditions interest you, where, and when. For a series, include how often you want a value. You can describe a city, an area, a station or a route in your own words.</p></div></div>}
+  const empty = messages.length === 0 && results.length === 0 && !proposal;
+  useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, results, busy, empty]);
+  const catalogPicker = <><Tooltip title="Browse weather variables"><span><IconButton size="small" aria-label="Browse weather variables" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedParameters.length} invisible={!selectedParameters.length}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
+    <Popover open={Boolean(catalogAnchor)} anchorEl={catalogAnchor} onClose={() => setCatalogAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'bottom', horizontal: 'right' }} slotProps={{ paper: { className: 'catalog-popover' } }}>
+      {catalogError && <Alert severity="warning" sx={{ mb: 1.5 }}>The parameter catalog could not be loaded: {catalogError}</Alert>}
+      <Autocomplete multiple options={options} groupBy={option => option.domain} value={options.filter(option => selectedParameters.includes(option.parameter))}
+        getOptionLabel={option => option.parameter} loading={catalogBusy} onChange={(_, selected) => setSelectedParameters(selected.slice(0, 10).map(option => option.parameter))}
+        renderInput={params => <TextField {...params} autoFocus label="Weather variables and parameter families" placeholder="Parameter code or name" helperText={catalog ? `Optional · up to 10 · ${catalog.parameters.length} parameters · catalog ${catalog.version}` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
+        renderOption={(props, option) => <li {...props} key={option.parameter}><span><strong>{option.parameter}</strong><br />{option.description}</span></li>} />
+    </Popover></>;
+
+  return <section className={`chat-workspace ${empty ? 'is-empty' : ''}`} aria-label="Meteomatics query assistant">
+    {empty && <ChatGreeting />}
+    {!empty && <div className="chat-thread" aria-live="polite">
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
     {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>{sourceIssue ? 'Choose a data source' : 'Ready to submit'}</strong><p>{summary}</p><p>{locationLabel || 'Selected location'}{proposal.point ? ` · ${proposal.point.latitude}, ${proposal.point.longitude}` : ''}</p><p>Dates (UTC): {proposal.validDates}</p><p>Variables: {proposal.parameters.join(', ')} · Format: {proposal.format.toUpperCase()} · Source: {proposal.source}</p></div></div>
@@ -134,13 +142,16 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated }: { sessionI
         <Button variant="contained" disabled={busy || sourceIssue} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
       <Collapse in={showRequest}><div className="meteo-request-details"><pre>{JSON.stringify(proposal, null, 2)}</pre><div>{(availability?.ranges ?? []).map(range => <Chip key={range.parameter} size="small" color={range.requestedWithinRange ? 'success' : 'error'} label={`${range.parameter}: ${range.minDate || 'unavailable'} → ${range.maxDate || 'unavailable'}`} />)}</div></div></Collapse>
     </div>}
+      {results.map((result, index) => <MeteomaticsResponse key={`${result.requestedAt}-${index}`} result={result} />)}
       {busy && <div className="conversation-message assistant"><div className="typing-indicator"><CircularProgress size={14} /> Checking the request…</div></div>}
+      <div ref={threadEnd} />
+    </div>}
+    {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
+    <div className="chat-dock">
+      <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the Meteomatics assistant" maxLength={2000} placeholder="Ask for weather data: what, where and when…"
+        canSubmit={Boolean(input.trim()) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
+      {empty && searchSuggestions.length > 0 && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
+      <span className="chat-disclaimer">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
     </div>
-    <div className="meteo-composer"><div className="meteo-search-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div><div className="composer"><TextField fullWidth multiline maxRows={4} value={input} onChange={event => setInput(event.target.value)}
-      onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Describe a Meteomatics request…" aria-label="Message the Meteomatics assistant" slotProps={{ htmlInput: { maxLength: 2000 } }} />
-      <Button variant="contained" aria-label="Send message" disabled={!input.trim() || busy || catalogBusy || !loaded} onClick={() => void send()}><Send /></Button></div></div>
-    {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
-    {results.map((result, index) => <MeteomaticsResponse key={`${result.requestedAt}-${index}`} result={result} />)}
-    <span className="composer-hint">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
   </section>;
 }

@@ -1,25 +1,33 @@
 import { createTheme } from '@mui/material/styles';
+import { COLORS, FONTS } from './theme.constant';
+
+const toVariables = (prefix: string, tokens: Record<string, string>) => Object.fromEntries(
+  Object.entries(tokens).map(([name, value]) => [`--${prefix}-${name.replace(/([a-z])([A-Z0-9])/g, '$1-$2').toLowerCase()}`, value]),
+);
+
+export const themeVariables = { ...toVariables('color', COLORS), ...toVariables('font', FONTS) };
 
 export const theme = createTheme({
   palette: {
-    primary: { main: '#204c3e', dark: '#16392f', contrastText: '#fffdf7' },
-    secondary: { main: '#d96c3f' },
-    background: { default: '#f6f5ef', paper: '#fffef9' },
-    text: { primary: '#243c33', secondary: '#788078' },
-    divider: '#e3e5db',
-    warning: { main: '#9c662c' },
+    primary: { main: COLORS.green800, dark: COLORS.green900, contrastText: COLORS.paper },
+    secondary: { main: COLORS.accent },
+    background: { default: COLORS.page, paper: COLORS.paper },
+    text: { primary: COLORS.ink, secondary: COLORS.sage600 },
+    divider: COLORS.line100,
+    warning: { main: COLORS.warning },
   },
   typography: {
-    fontFamily: '"Manrope", sans-serif', fontSize: 13,
-    h1: { fontFamily: '"Instrument Serif", serif', fontWeight: 400 },
-    h2: { fontFamily: '"Instrument Serif", serif', fontWeight: 400 },
-    h3: { fontFamily: '"Instrument Serif", serif', fontWeight: 400 },
+    fontFamily: FONTS.body, fontSize: 13,
+    h1: { fontFamily: FONTS.display, fontWeight: 400 },
+    h2: { fontFamily: FONTS.display, fontWeight: 400 },
+    h3: { fontFamily: FONTS.display, fontWeight: 400 },
     button: { textTransform: 'none', fontWeight: 700 },
   },
   shape: { borderRadius: 10 },
   components: {
+    MuiCssBaseline: { styleOverrides: { ':root': themeVariables } },
     MuiButton: { defaultProps: { disableElevation: true }, styleOverrides: { root: { borderRadius: 7, padding: '10px 18px' } } },
-    MuiOutlinedInput: { styleOverrides: { root: { background: '#fffef9', fontSize: 13 }, notchedOutline: { borderColor: '#dfe2d7' } } },
+    MuiOutlinedInput: { styleOverrides: { root: { background: COLORS.paper, fontSize: 13 }, notchedOutline: { borderColor: COLORS.line100 } } },
     MuiTab: { styleOverrides: { root: { textTransform: 'none', fontWeight: 700, minHeight: 47, fontSize: 12 } } },
     MuiPaper: { defaultProps: { elevation: 0 } },
     MuiTooltip: { defaultProps: { arrow: true } },

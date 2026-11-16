@@ -69,8 +69,10 @@ export class SessionRepository {
       page.docs.forEach(doc => batch.delete(doc.ref));
       await batch.commit();
     }
-    const state = await this.ref(sessionId).collection('meteoState').get();
-    if (!state.empty) { const batch = this.db.batch(); state.docs.forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
+    for (const name of ['meteoState', 'comparisons']) {
+      const state = await this.ref(sessionId).collection(name).get();
+      if (!state.empty) { const batch = this.db.batch(); state.docs.forEach(doc => batch.delete(doc.ref)); await batch.commit(); }
+    }
     await this.ref(sessionId).delete();
   }
 

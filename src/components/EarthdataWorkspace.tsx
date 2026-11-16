@@ -8,6 +8,7 @@ import { executeEarthdataQuery, getEarthdataCatalog, interpretEarthdata } from '
 import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
+import { SessionComparison } from './SessionComparison';
 import { DictationButton } from './DictationButton';
 import { SessionLoading } from './SessionLoading';
 
@@ -22,7 +23,7 @@ const errorText = (cause: unknown) => {
 };
 
 /** Chat workflow for NASA AppEEARS series at any place on Earth; mirrors the Giovanni workspace. */
-export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
+export function EarthdataWorkspace({ sessionId, sessions, onSessionUpdated, tools }: { sessionId: string; sessions: ConversationSession[]; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
   const [catalog, setCatalog] = useState<EarthdataCatalogResponse | null>(null);
@@ -33,6 +34,7 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [busy, setBusy] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<EarthdataQuerySpec | null>(null);
   const [results, setResults] = useState<EarthdataExecuteResponse[]>([]);
@@ -84,20 +86,21 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
 
   const execute = async () => {
     if (!proposal || busy) return;
-    setBusy(true); setError('');
+    setBusy(true); setExecuting(true); setError('');
     try {
       const response = await executeEarthdataQuery({ spec: proposal, confirmed: true });
       setResults(items => [...items, response]);
     }
     catch (cause) { setError(errorText(cause)); }
     finally {
-      setBusy(false);
+      setBusy(false); setExecuting(false);
       // Running a query can start a NASA request, so the stored coverage and its status are read again.
       void getEarthdataCatalog().then(setCatalog).catch(() => undefined);
     }
   };
 
   const empty = messages.length === 0 && results.length === 0 && !proposal;
+  const submitted = executing || results.length > 0;
   useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, results, busy, empty]);
   const catalogPicker = <><Tooltip title="Browse NASA Earthdata variables and stored places"><span><IconButton size="small" aria-label="Browse NASA Earthdata variables and stored places" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedCount} invisible={!selectedCount}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
     <Popover open={Boolean(catalogAnchor)} anchorEl={catalogAnchor} onClose={() => setCatalogAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'bottom', horizontal: 'right' }} slotProps={{ paper: { className: 'catalog-popover' } }}>
@@ -119,7 +122,7 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
     {!empty && <div className="chat-thread" aria-live="polite">
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
-      {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>Places: {locationLabel || proposal.zones.map(describeZone).join(', ')}</p><p>Dates: {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describeVariable).join(', ')} · Source: NASA AppEEARS</p></div></div>
+      {proposal && !submitted && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>Places: {locationLabel || proposal.zones.map(describeZone).join(', ')}</p><p>Dates: {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describeVariable).join(', ')} · Source: NASA AppEEARS</p></div></div>
         <div className="meteo-controls"><Button size="small" endIcon={<ExpandMore />} onClick={() => setShowRequest(value => !value)}>{showRequest ? 'Hide request' : 'Review request'}</Button>
           <Button variant="contained" disabled={busy} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
         <Collapse in={showRequest}><div className="meteo-request-details"><pre>{JSON.stringify(proposal, null, 2)}</pre></div></Collapse>
@@ -129,14 +132,15 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
         <MeteomaticsResponse result={result} />
       </Fragment>)}
       {busy && <div className="conversation-message assistant"><div className="typing-indicator"><CircularProgress size={14} /> Checking the request…</div></div>}
+      {results.length > 0 && <SessionComparison sessionId={sessionId} sessions={sessions} ready={!executing} />}
       <div ref={threadEnd} />
     </div>}
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
-    <div className="chat-dock">
+    {!submitted && <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Earthdata assistant" maxLength={2000} placeholder="Ask for NASA satellite data: what, where on Earth and when…"
         canSubmit={Boolean(input.trim() || selectedCount) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
       {empty && <div className="chat-suggestions" aria-label="Suggested searches">{EARTHDATA_SEARCH_SUGGESTIONS.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
       <span className="chat-disclaimer">NASA Earthdata values come from NASA AppEEARS: the satellite pixel at a place, or the average over a stored area (boundaries © OpenStreetMap contributors, geoBoundaries, ODbL). New places are requested from NASA and take minutes to hours. This does not run the trend analysis.</span>
-    </div>
+    </div>}
   </section>;
 }

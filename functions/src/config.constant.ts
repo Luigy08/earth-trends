@@ -39,6 +39,7 @@ export const CONFIG = {
     meteomaticsExecute: positiveInteger('QUOTA_METEOMATICS_EXECUTE', 20),
     giovanniExecute: positiveInteger('QUOTA_GIOVANNI_EXECUTE', 20),
     earthdataExecute: positiveInteger('QUOTA_EARTHDATA_EXECUTE', 60),
+    compareSessions: positiveInteger('QUOTA_COMPARE_SESSIONS', 30),
   },
 } as const;
 
@@ -48,5 +49,9 @@ export const MIN_COVERAGE = 0.8;
 export const METHODOLOGY_VERSION = '1.0.0-nw-calendar-lags';
 export const LEASE_MS = 600_000;
 export const MAX_ATTEMPTS = 3;
+/** Cross-session comparison: operational thresholds of this POC, not universal standards. */
+export const MIN_COMMON_MONTHS = 36;
+export const MAX_COMPARISON_LAG_MONTHS = 6;
+export const COMPARISON_METHODOLOGY_VERSION = '1.0.0-anomaly-pearson-bretherton';
 /** A same-named place is chosen automatically only when it has at least this many times the population of the next one. */
 export const PLACE_DOMINANCE_RATIO = 10;

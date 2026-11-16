@@ -7,6 +7,7 @@ import { executeMeteomaticsQuery, getMeteomaticsCatalog, getMeteomaticsSuggestio
 import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
+import { SessionComparison } from './SessionComparison';
 import { DictationButton } from './DictationButton';
 import { SessionLoading } from './SessionLoading';
 
@@ -23,7 +24,7 @@ const errorText = (cause: unknown) => {
   return cause instanceof Error ? cause.message : 'The Meteomatics service is unavailable.';
 };
 
-export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
+export function MeteomaticsWorkspace({ sessionId, sessions, onSessionUpdated, tools }: { sessionId: string; sessions: ConversationSession[]; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
   const [searchSuggestions, setSearchSuggestions] = useState<string[]>([]);
@@ -35,6 +36,7 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [busy, setBusy] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<MeteomaticsQuerySpec | null>(null);
   const [availability, setAvailability] = useState<MeteomaticsAvailabilityResponse | null>(null);
@@ -99,16 +101,17 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
 
   const execute = async () => {
     if (!proposal || busy || sourceIssue) return;
-    setBusy(true); setError('');
+    setBusy(true); setExecuting(true); setError('');
     try {
       const response = await executeMeteomaticsQuery({ spec: proposal, confirmed: true });
       setResults(items => [...items, response]);
     }
     catch (cause) { setError(errorText(cause)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setExecuting(false); }
   };
 
   const empty = messages.length === 0 && results.length === 0 && !proposal;
+  const submitted = executing || results.length > 0;
   useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, results, busy, empty]);
   const catalogPicker = <><Tooltip title="Browse weather variables"><span><IconButton size="small" aria-label="Browse weather variables" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedParameters.length} invisible={!selectedParameters.length}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
     <Popover open={Boolean(catalogAnchor)} anchorEl={catalogAnchor} onClose={() => setCatalogAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'bottom', horizontal: 'right' }} slotProps={{ paper: { className: 'catalog-popover' } }}>
@@ -126,7 +129,7 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
     {!empty && <div className="chat-thread" aria-live="polite">
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
-    {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>{sourceIssue ? 'Choose a data source' : 'Ready to submit'}</strong><p>{summary}</p><p>{locationLabel || 'Selected location'}{proposal.point ? ` · ${proposal.point.latitude}, ${proposal.point.longitude}` : ''}</p><p>Dates (UTC): {proposal.validDates}</p><p>Variables: {proposal.parameters.join(', ')} · Format: {proposal.format.toUpperCase()} · Source: {proposal.source}</p></div></div>
+    {proposal && !submitted && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>{sourceIssue ? 'Choose a data source' : 'Ready to submit'}</strong><p>{summary}</p><p>{locationLabel || 'Selected location'}{proposal.point ? ` · ${proposal.point.latitude}, ${proposal.point.longitude}` : ''}</p><p>Dates (UTC): {proposal.validDates}</p><p>Variables: {proposal.parameters.join(', ')} · Format: {proposal.format.toUpperCase()} · Source: {proposal.source}</p></div></div>
       <TextField select fullWidth size="small" label="Data source" value={sourceIssue ? '' : proposal.source} onChange={event => { setProposal(current => current ? { ...current, source: event.target.value } : current); setError(''); }} helperText={sourceIssue ? 'ECMWF offers several products. Select a specific source before submitting.' : 'Changing the source changes the dataset. Availability depends on your account and dates.'} sx={{ mt: 2 }}>
         <MenuItem value="" disabled>Choose a source</MenuItem>
         <MenuItem value="mix">Meteomatics Mix</MenuItem>
@@ -139,14 +142,15 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
     </div>}
       {results.map((result, index) => <MeteomaticsResponse key={`${result.requestedAt}-${index}`} result={result} />)}
       {busy && <div className="conversation-message assistant"><div className="typing-indicator"><CircularProgress size={14} /> Checking the request…</div></div>}
+      {results.length > 0 && <SessionComparison sessionId={sessionId} sessions={sessions} ready={!executing} />}
       <div ref={threadEnd} />
     </div>}
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
-    <div className="chat-dock">
+    {!submitted && <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the Meteomatics assistant" maxLength={2000} placeholder="Ask for weather data: what, where and when…"
         canSubmit={Boolean(input.trim() || selectedParameters.length) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
       {empty && (searchSuggestions.length > 0 || suggestionsBusy) && <div className="chat-suggestions" aria-label="Suggested searches">{searchSuggestions.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}<Tooltip title="Refresh suggestions"><span><IconButton className="suggestions-refresh" size="small" aria-label="Refresh suggestions" onClick={() => void refreshSearchSuggestions(true)} disabled={suggestionsBusy || busy || !loaded}>{suggestionsBusy ? <CircularProgress size={15} /> : <Refresh fontSize="small" />}</IconButton></span></Tooltip></div>}
       <span className="chat-disclaimer">Meteomatics access depends on the configured account and subscription. This does not produce climate trend statistics.</span>
-    </div>
+    </div>}
   </section>;
 }

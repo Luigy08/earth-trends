@@ -257,3 +257,77 @@ export interface EarthdataSessionState {
   selectedParameters: string[];
   selectedZones: string[];
 }
+
+/** Cross-session comparison: one other session's series overlaid on this session's, with correlation statistics. */
+export interface ComparableSeriesSummary {
+  /** Stable within a session: "<result index>|<parameter>|<lat>,<lon>" for query chats, "analysis|<location id>" for trend analyses. */
+  key: string;
+  label: string;
+  unit: string;
+  provider: string;
+  aggregation: 'mean' | 'sum';
+  firstYear: number;
+  lastYear: number;
+  validMonths: number;
+}
+export interface ComparableSeries extends ComparableSeriesSummary {
+  sessionId: string;
+  sessionTitle: string;
+  monthly: MonthlyObservation[];
+  annual: AnnualObservation[];
+  trend: TrendStatistics | null;
+  provenance: DataProvenance | null;
+}
+export interface GetComparableSeriesRequest { sessionId: string }
+export interface GetComparableSeriesResponse { series: ComparableSeriesSummary[]; unavailableReason?: string }
+export interface CompareSessionsRequest { sessionId: string; seriesKey: string; otherSessionId: string; otherSeriesKey: string }
+export interface CorrelationEstimate {
+  r: number;
+  sampleSize: number;
+  /** Sample size adjusted for lag-1 autocorrelation of both series (Bretherton et al. 1999). */
+  effectiveSampleSize: number;
+  pValue: number;
+  confidenceInterval95: [number, number];
+  significant: boolean;
+}
+export interface ComparisonStatistics {
+  commonMonths: number;
+  commonYears: number;
+  /** Pearson r of raw monthly values; shared seasonality inflates it. Descriptive only. */
+  monthlyRawR: number;
+  /** Pearson r of deseasonalized monthly anomalies, with autocorrelation-adjusted inference. The headline figure. */
+  monthlyAnomaly: CorrelationEstimate;
+  /** Spearman rank correlation of the monthly anomalies. Descriptive only. */
+  monthlyAnomalySpearman: number;
+  lag1AutocorrelationA: number;
+  lag1AutocorrelationB: number;
+  /** Strongest anomaly correlation within ±6 months; positive lag means B follows A. Descriptive only. */
+  bestLag: { months: number; r: number };
+  /** Change in B's anomaly per unit of A's anomaly (OLS). */
+  anomalySlopeBOnA: number;
+  annual: CorrelationEstimate | null;
+  /** Correlation of annual values after removing each series' linear trend. */
+  annualDetrendedR: number | null;
+  trendDirections: { a: 'increase' | 'decrease' | 'flat' | 'unknown'; b: 'increase' | 'decrease' | 'flat' | 'unknown'; agree: boolean | null };
+}
+export interface ComparisonReport {
+  source: 'gemini' | 'template';
+  headline: string;
+  findings: string[];
+  caveats: string[];
+  nextSteps: string[];
+}
+export interface SessionComparison {
+  id: string;
+  createdAt: string;
+  outcome: 'completed' | 'insufficient_data';
+  a: ComparableSeries;
+  b: ComparableSeries;
+  commonMonths: number;
+  commonYears: number;
+  statistics: ComparisonStatistics | null;
+  report: ComparisonReport;
+  warnings: string[];
+  methodologyVersion: string;
+}
+export interface SessionComparisonResponse { comparison: SessionComparison | null }

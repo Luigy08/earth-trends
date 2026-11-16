@@ -2,6 +2,7 @@ import { FirebaseError, initializeApp, getApps, type FirebaseApp } from 'firebas
 import { connectAuthEmulator, getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import type { AttachSessionAnalysisRequest, AttachSessionAnalysisResponse, ChatSessionRequest, ChatSessionResponse, ConversationSession, CreateAnalysisRequest, CreateAnalysisResponse, CreateSessionResponse, DeleteSessionResponse, GetAnalysisRequest, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteRequest, GiovanniExecuteResponse, GiovanniSessionState, InterpretGiovanniRequest, InterpretGiovanniResponse, QuerySessionWorkflow, InterpretMeteomaticsRequest, InterpretMeteomaticsResponse, InterpretQueryRequest, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityRequest, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteRequest, MeteomaticsExecuteResponse, RenameSessionRequest, SearchLocationsRequest, SearchLocationsResponse, SessionRequest } from '../../shared/types';
+import type { CompareSessionsRequest, GetComparableSeriesResponse, SessionComparisonResponse } from '../../shared/types';
 import type { EarthdataCatalogResponse, EarthdataExecuteRequest, EarthdataExecuteResponse, EarthdataSessionState, InterpretEarthdataRequest, InterpretEarthdataResponse } from '../../shared/types';
 import { ENV_KEYS } from '../app.constant';
 
@@ -63,6 +64,9 @@ export const renameSession = (data: RenameSessionRequest) => call<RenameSessionR
 export const deleteSession = (data: SessionRequest) => call<SessionRequest, DeleteSessionResponse>('deleteSession', data);
 export const chatSession = (data: ChatSessionRequest) => call<ChatSessionRequest, ChatSessionResponse>('chatSession', data);
 export const attachSessionAnalysis = (data: AttachSessionAnalysisRequest) => call<AttachSessionAnalysisRequest, AttachSessionAnalysisResponse>('attachSessionAnalysis', data);
+export const getComparableSeries = (data: SessionRequest) => call<SessionRequest, GetComparableSeriesResponse>('getComparableSeries', data);
+export const getSessionComparison = (data: SessionRequest) => call<SessionRequest, SessionComparisonResponse>('getSessionComparison', data);
+export const compareSessions = (data: CompareSessionsRequest) => call<CompareSessionsRequest, SessionComparisonResponse>('compareSessions', data);
 let catalogCache: Promise<MeteomaticsCatalogResponse> | undefined;
 let suggestionsCache: Promise<import('../../shared/types').MeteomaticsSuggestionsResponse> | undefined;
 export const getMeteomaticsCatalog = () => catalogCache ??= call<Record<string, never>, MeteomaticsCatalogResponse>('getMeteomaticsCatalog', {}).catch(error => { catalogCache = undefined; throw error; });

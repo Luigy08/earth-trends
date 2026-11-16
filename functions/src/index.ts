@@ -7,6 +7,7 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onRequest } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import type { EarthdataCatalogResponse, EarthdataExecuteResponse, EarthdataQuerySpec, InterpretEarthdataResponse } from '../../shared/types';
+import type { GetComparableSeriesResponse, SessionComparisonResponse } from '../../shared/types';
 import type { AttachSessionAnalysisResponse, ChatSessionResponse, GetAnalysisResponse, GetSessionResponse, GiovanniCatalogResponse, GiovanniExecuteResponse, GiovanniQuerySpec, InterpretGiovanniResponse, InterpretMeteomaticsResponse, QueryExecuteResponse, InterpretQueryResponse, ListSessionsResponse, MeteomaticsAvailabilityResponse, MeteomaticsCatalogResponse, MeteomaticsExecuteResponse, SearchLocationsResponse } from '../../shared/types';
 import { METEOMATICS_CATALOG_SOURCE, METEOMATICS_CATALOG_VERSION, METEOMATICS_PARAMETER_CATALOG } from '../../shared/meteomatics-catalog.constant';
 import { CONFIG } from './config.constant';
@@ -18,12 +19,10 @@ import { MeteomaticsProvider, processingSecrets } from './providers/meteomatics'
 import { MeteomaticsQueryProvider } from './providers/meteomatics-query';
 import { GiovanniProvider, giovanniSecrets } from './providers/giovanni';
 import { GiovanniQueryProvider } from './providers/giovanni-query';
-import { resolveGiovanniChart } from './giovanni-chart.resolver';
 import { GIOVANNI_CATALOG_SOURCE, GIOVANNI_CATALOG_VERSION, GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { LocationSearch } from './providers/locations';
 import { explainResults, interpretEarthdataQuery, interpretGiovanniQuery, interpretMeteomaticsQuery, parseIntent, resolveInterpretation } from './ai';
 import { meteomaticsSourceIssue } from './meteomatics-source.resolver';
-import { resolveMeteomaticsChart } from './meteomatics-chart.resolver';
 import { generateMeteomaticsSuggestions } from './meteomatics-suggestions';
 import { consumeQuota } from './quota';
 import { SourceError } from './http';
@@ -31,8 +30,9 @@ import { balamApiOptions, balamBackfillOptions, balamIngestOptions, getIngest as
 import { balamDatabaseSecrets, balamSecrets } from './balam/balam.constant';
 import { INGEST_TARGETS } from './ingest/targets.constant';
 import { EarthdataQueryProvider, EarthdataRequestError } from './providers/earthdata-query';
-import { resolveEarthdataChart } from './earthdata-chart.resolver';
-import { earthdataExecuteSchema, interpretEarthdataSchema } from './validation';
+import { compareSessionsSchema, earthdataExecuteSchema, interpretEarthdataSchema } from './validation';
+import { ComparisonService } from './comparison';
+import { withChartTrends } from './comparison-series.resolver';
 import { attachSessionAnalysisSchema, chatSessionSchema, createAnalysisSchema, getAnalysisSchema, giovanniExecuteSchema, interpretGiovanniSchema, interpretMeteomaticsSchema, interpretQuerySchema, saveQuerySessionSchema, meteomaticsAvailabilitySchema, meteomaticsExecuteSchema, parseInput, renameSessionSchema, searchLocationsSchema, sessionRequestSchema } from './validation';
 
 if (!getApps().length) initializeApp({ projectId: CONFIG.projectId });
@@ -41,6 +41,7 @@ const db = getFirestore();
 const cache = new FirestoreCache(db);
 const repository = new AnalysisRepository(db);
 const sessions = new SessionRepository(db);
+const comparisons = new ComparisonService(db, sessions, repository);
 const locations = new LocationSearch(cache);
 const analysisService = new AnalysisService(new MeteomaticsProvider(cache), cache, { giovanni: new GiovanniProvider(cache) });
 const meteomaticsQueries = new MeteomaticsQueryProvider(cache);
@@ -85,15 +86,30 @@ export const getMeteomaticsSession = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);
   const input = parseInput(sessionRequestSchema, request.data);
   await sessions.get(ownerId, input.sessionId);
-  const snapshot = await db.collection('sessions').doc(input.sessionId).collection('meteoState').orderBy('index').get();
-  if (snapshot.empty) return { state: null };
-  const state = JSON.parse(snapshot.docs.map(doc => doc.get('data')).join('')) as import('../../shared/types').MeteomaticsSessionState | import('../../shared/types').GiovanniSessionState | import('../../shared/types').EarthdataSessionState;
+  const state = await comparisons.loadQueryState(input.sessionId);
+  if (!state) return { state: null };
   // Session state holds Meteomatics, Giovanni or Earthdata results; chart trends are recomputed on read.
-  if (Array.isArray(state.results)) state.results = (state.results as QueryExecuteResponse[]).map(result => result.provider === 'NASA Giovanni'
-    ? { ...result, chartTrends: resolveGiovanniChart(result.result, result.request) }
-    : result.provider === 'NASA AppEEARS' ? { ...result, chartTrends: resolveEarthdataChart(result.result, result.request) }
-    : { ...result, chartTrends: resolveMeteomaticsChart(result.result, result.request) }) as typeof state.results;
+  if (Array.isArray(state.results)) state.results = (state.results as QueryExecuteResponse[]).map(withChartTrends) as typeof state.results;
   return { state };
+});
+export const getComparableSeries = onCall(callableOptions, async (request): Promise<GetComparableSeriesResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(sessionRequestSchema, request.data);
+  return comparisons.listSeries(ownerId, input.sessionId);
+});
+export const getSessionComparison = onCall(callableOptions, async (request): Promise<SessionComparisonResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(sessionRequestSchema, request.data);
+  return { comparison: await comparisons.get(ownerId, input.sessionId) };
+});
+export const compareSessions = onCall({ ...callableOptions, timeoutSeconds: 180, // Explicit: its first creation failed, so Firebase never granted the callable invoker binding.
+  invoker: 'public' }, async (request): Promise<SessionComparisonResponse> => {
+  const ownerId = requireOwner(request);
+  const input = parseInput(compareSessionsSchema, request.data);
+  const existing = await comparisons.get(ownerId, input.sessionId);
+  if (existing) return { comparison: existing };
+  await consumeQuota(db, ownerId, 'compareSessions');
+  return { comparison: await comparisons.compare(ownerId, input) };
 });
 export const saveMeteomaticsSession = onCall(callableOptions, async request => {
   const ownerId = requireOwner(request);

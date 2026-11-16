@@ -28,7 +28,7 @@ const intentSchema = z.object({
 });
 
 let ai: ReturnType<typeof genkit> | undefined;
-function getAi(): ReturnType<typeof genkit> {
+export function getAi(): ReturnType<typeof genkit> {
   return ai ??= genkit({ plugins: [vertexAI({ projectId: CONFIG.projectId, location: CONFIG.vertexLocation })] });
 }
 

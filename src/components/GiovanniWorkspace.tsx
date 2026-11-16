@@ -8,6 +8,7 @@ import { executeGiovanniQuery, getGiovanniCatalog, interpretGiovanni } from '../
 import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
+import { SessionComparison } from './SessionComparison';
 import { DictationButton } from './DictationButton';
 import { SessionLoading } from './SessionLoading';
 
@@ -22,7 +23,7 @@ const errorText = (cause: unknown) => {
 };
 
 /** Chat workflow for raw NASA Giovanni point time series; mirrors the Meteomatics workspace. */
-export function GiovanniWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
+export function GiovanniWorkspace({ sessionId, sessions, onSessionUpdated, tools }: { sessionId: string; sessions: ConversationSession[]; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
   const [catalog, setCatalog] = useState<GiovanniCatalogResponse | null>(null);
@@ -32,6 +33,7 @@ export function GiovanniWorkspace({ sessionId, onSessionUpdated, tools }: { sess
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatLine[]>([]);
   const [busy, setBusy] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [error, setError] = useState('');
   const [proposal, setProposal] = useState<GiovanniQuerySpec | null>(null);
   const [results, setResults] = useState<GiovanniExecuteResponse[]>([]);
@@ -79,16 +81,17 @@ export function GiovanniWorkspace({ sessionId, onSessionUpdated, tools }: { sess
 
   const execute = async () => {
     if (!proposal || busy) return;
-    setBusy(true); setError('');
+    setBusy(true); setExecuting(true); setError('');
     try {
       const response = await executeGiovanniQuery({ spec: proposal, confirmed: true });
       setResults(items => [...items, response]);
     }
     catch (cause) { setError(errorText(cause)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setExecuting(false); }
   };
 
   const empty = messages.length === 0 && results.length === 0 && !proposal;
+  const submitted = executing || results.length > 0;
   useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, results, busy, empty]);
   const catalogPicker = <><Tooltip title="Browse NASA variables"><span><IconButton size="small" aria-label="Browse NASA variables" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedParameters.length} invisible={!selectedParameters.length}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
     <Popover open={Boolean(catalogAnchor)} anchorEl={catalogAnchor} onClose={() => setCatalogAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'bottom', horizontal: 'right' }} slotProps={{ paper: { className: 'catalog-popover' } }}>
@@ -106,21 +109,22 @@ export function GiovanniWorkspace({ sessionId, onSessionUpdated, tools }: { sess
     {!empty && <div className="chat-thread" aria-live="polite">
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
-      {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>{locationLabel || 'Selected location'} · {proposal.point.latitude}, {proposal.point.longitude}</p><p>Dates (UTC): {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describe).join(', ')} · Source: NASA Giovanni (nearest grid cell)</p></div></div>
+      {proposal && !submitted && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>{locationLabel || 'Selected location'} · {proposal.point.latitude}, {proposal.point.longitude}</p><p>Dates (UTC): {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describe).join(', ')} · Source: NASA Giovanni (nearest grid cell)</p></div></div>
         <div className="meteo-controls"><Button size="small" endIcon={<ExpandMore />} onClick={() => setShowRequest(value => !value)}>{showRequest ? 'Hide request' : 'Review request'}</Button>
           <Button variant="contained" disabled={busy} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
         <Collapse in={showRequest}><div className="meteo-request-details"><pre>{JSON.stringify(proposal, null, 2)}</pre></div></Collapse>
       </div>}
       {results.map((result, index) => <MeteomaticsResponse key={`${result.requestedAt}-${index}`} result={result} />)}
       {busy && <div className="conversation-message assistant"><div className="typing-indicator"><CircularProgress size={14} /> Checking the request…</div></div>}
+      {results.length > 0 && <SessionComparison sessionId={sessionId} sessions={sessions} ready={!executing} />}
       <div ref={threadEnd} />
     </div>}
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
-    <div className="chat-dock">
+    {!submitted && <div className="chat-dock">
       <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Giovanni assistant" maxLength={2000} placeholder="Ask for NASA Earth data: what, where and when…"
         canSubmit={Boolean(input.trim() || selectedParameters.length) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
       {empty && <div className="chat-suggestions" aria-label="Suggested searches">{GIOVANNI_SEARCH_SUGGESTIONS.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
       <span className="chat-disclaimer">NASA Giovanni access requires the server's Earthdata Login. Values are raw point time series at the nearest grid cell; this does not run the trend analysis.</span>
-    </div>
+    </div>}
   </section>;
 }

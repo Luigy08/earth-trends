@@ -53,6 +53,9 @@ const sessionId = z.string().regex(/^[A-Za-z0-9_-]{8,128}$/);
 export const sessionRequestSchema = z.object({ sessionId }).strict();
 export const chatSessionSchema = z.object({ sessionId, message: z.string().trim().min(3).max(1500) }).strict();
 export const renameSessionSchema = z.object({ sessionId, title: z.string().trim().min(1).max(80) }).strict();
+const seriesKey = z.string().trim().min(1).max(400);
+export const compareSessionsSchema = z.object({ sessionId, seriesKey, otherSessionId: sessionId, otherSeriesKey: seriesKey }).strict()
+  .refine(input => input.sessionId !== input.otherSessionId, 'Choose a different session to compare.');
 export const attachSessionAnalysisSchema = z.object({ sessionId, analysisId: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 
 const coordinateSchema = z.object({ latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).strict();

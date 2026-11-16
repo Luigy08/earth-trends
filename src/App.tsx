@@ -9,6 +9,7 @@ import { useAnalysis } from './analysis/useAnalysis';
 import { useSessions } from './analysis/useSessions';
 import { Sidebar } from './components/Sidebar';
 import { ConversationWorkspace } from './components/ConversationWorkspace';
+import { SessionComparison } from './components/SessionComparison';
 import { SessionLoading } from './components/SessionLoading';
 import { MeteomaticsWorkspace } from './components/MeteomaticsWorkspace';
 import { GiovanniWorkspace } from './components/GiovanniWorkspace';
@@ -56,15 +57,16 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
       <main id="main-content" className={page === 'explore' ? 'chat-main' : undefined}>{!isConfigured && <div className="connection-banner"><span className="connection-dot" /><span>Explore mode<span className="connection-description"> · Configure Firebase to start exploring live data.</span></span><button onClick={() => setSetupOpen(true)}>Configure connection<ArrowOutward /></button></div>}
         {page === 'explore' && (sessions.openingSession ? <SessionLoading /> : <>
           {queryWorkflow !== 'trend' && sessions.current && !sessions.busy && sessions.error && <Alert severity="error" className="chat-alert">{sessions.error}</Alert>}
-          {queryWorkflow === 'trend' && <ConversationWorkspace messages={sessions.messages} proposal={sessions.proposal} busy={sessions.busy} error={sessions.error} analysisBusy={analysisBusy} sessionReady={Boolean(sessions.current)} onSend={message => { void sessions.send(message); }} onConfirm={spec => { void confirmAnalysis(spec); }} tools={workflowSelect}>
+          {queryWorkflow === 'trend' && <ConversationWorkspace messages={sessions.messages} proposal={sessions.proposal} busy={sessions.busy} error={sessions.error} analysisBusy={analysisBusy} submitted={analysisBusy || Boolean(analysis)} sessionReady={Boolean(sessions.current)} onSend={message => { void sessions.send(message); }} onConfirm={spec => { void confirmAnalysis(spec); }} tools={workflowSelect}>
             {showResults && <Results analysis={analysis} busy={analysisBusy} error={analysisError} onRetry={retry} canRetry={canRetry} onMethodology={() => setMethodologyOpen(true)} />}
+            {sessions.current?.analysisId && (analysis?.status === 'completed' || analysis?.status === 'insufficient_data') && <SessionComparison sessionId={sessions.current.id} sessions={sessions.sessions} ready />}
           </ConversationWorkspace>}
           {queryWorkflow !== 'trend' && (sessions.current && !sessions.busy && !workflowUnavailable
             ? queryWorkflow === 'earthdata'
-              ? <EarthdataWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
+              ? <EarthdataWorkspace key={sessions.current.id} sessionId={sessions.current.id} sessions={sessions.sessions} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
               : queryWorkflow === 'giovanni'
-              ? <GiovanniWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
-              : <MeteomaticsWorkspace key={sessions.current.id} sessionId={sessions.current.id} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
+              ? <GiovanniWorkspace key={sessions.current.id} sessionId={sessions.current.id} sessions={sessions.sessions} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
+              : <MeteomaticsWorkspace key={sessions.current.id} sessionId={sessions.current.id} sessions={sessions.sessions} onSessionUpdated={sessions.updateSession} tools={workflowSelect} />
             : <section className="chat-workspace is-empty" aria-label={workflowUnavailable ? 'Query assistant' : `${QUERY_ASSISTANT_NAMES[queryWorkflow]} query assistant`}><ChatGreeting />{sessions.error && <Alert severity="error" className="chat-alert">{sessions.error}</Alert>}<div className="chat-dock"><ChatComposer value="" onChange={() => undefined} onSubmit={() => undefined} ariaLabel={workflowUnavailable ? 'Message the assistant' : `Message the ${QUERY_ASSISTANT_NAMES[queryWorkflow]} assistant`} maxLength={2000} disabled canSubmit={false} placeholder={sessions.busy ? 'Connecting to your session…' : workflowUnavailable ? 'This session is not available — start a new session' : 'Session unavailable — check the message above'} tools={workflowUnavailable ? undefined : workflowSelect} actions={<DictationButton disabled onTranscript={() => undefined} />} /></div></section>)}
         </>)}
         {page === 'analyses' && <AnalysesPage history={history} onSelect={item => { select(item); setQueryWorkflow('trend'); navigate('explore'); setTimeout(() => document.getElementById('evidencia')?.scrollIntoView({ behavior: 'smooth' }), 100); }} onExplore={() => navigate('explore')} />}

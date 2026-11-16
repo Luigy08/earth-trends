@@ -43,6 +43,7 @@ export const COLORS = {
   // Data and status
   chartBlue: '#3b82f6',
   chartRed: '#ef4444',
+  chartAmber: '#d97706',
   slate: '#334155',
   slateLine: '#dbe4ea',
   shadow: '#173d30',

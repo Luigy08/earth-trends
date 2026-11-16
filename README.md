@@ -19,9 +19,9 @@ NASA data is available through Giovanni and AppEEARS integrations. Meteomatics i
 
 1. Sign in with Google and choose a workflow in **Explore**.
 2. Ask a question in English, including the variable, location, and dates. The assistant interprets the request and asks for clarification when needed.
-3. Review the proposed request and confirm it. For trend analysis, select either NASA Giovanni or Meteomatics as the historical source.
+3. Review the proposed request and confirm it. For trend analysis, select either NASA Giovanni or Meteomatics, NASA AppEEARS as the historical source.
 4. Explore the returned series and source information. Trend results include coverage, the estimated slope, uncertainty, and statistical evidence when inference is supported.
-5. For trend results with observations, download the data and provenance as CSV or use the print dialog to save a PDF report. Sessions and analyses can be revisited from the sidebar.
+5. For trend results with observations, download the data and provenance as JSON or use the print dialog to save a PDF report. Sessions and analyses can be revisited from the sidebar.
 
 For example, choose **Trend analysis** and ask: “How has temperature changed in Tegucigalpa since 2000?” A second city or a second period can be included for comparison. A trend is an estimate over the selected period, not an explanation of its cause.
 
@@ -32,15 +32,11 @@ For example, choose **Trend analysis** and ask: “How has temperature changed i
 - **NASA Earthdata:** explores satellite data from NASA AppEEARS stored as averages over departments of Honduras. Its catalog and results depend on data ingested into the project's PostgreSQL store. Department boundaries are from geoBoundaries / OpenStreetMap contributors.
 - **Meteomatics data:** builds and confirms requests to the Meteomatics Weather API, checks source availability, and displays provider results. Supported parameters and coverage depend on the account and source.
 
-Current Meteomatics conditions are shown separately from historical analysis. Instantaneous temperature and hourly precipitation are not included in climate trend calculations.
-
 ## How trend analysis works
 
 The server validates the request, retrieves observations from the selected provider, and converts complete daily records into monthly values. A year is included only when it has 12 distinct valid months. Annual temperature is the calendar-day-weighted mean of monthly temperatures; annual precipitation is the sum of monthly totals. Missing values are not interpolated.
 
 A linear trend is inferred only when at least **10 complete years** and **80% of the requested years** are available. These are operational thresholds for this proof of concept, not a universal definition of adequate climate data. The application fits ordinary least squares against calendar years and uses Newey–West autocorrelation-robust uncertainty to report the slope per decade, a 95% confidence interval, and a two-sided p-value. Results below the threshold remain descriptive and explicitly report insufficient data.
-
-Location comparisons use complete years common to both locations. Period comparisons retain each period's own coverage; differences are descriptive and are not presented as a statistical test of the difference. Anomalies are displayed only when all 30 baseline years from 1991–2020 are complete.
 
 A non-significant result does not prove that nothing changed. A significant trend does not establish its cause. Provider outages and missing coverage are reported separately from statistical results. The numerical analysis and report are calculated by the server; Gemini can help interpret a question and add a qualitative explanation, with a deterministic report available when generated text is unsuitable or unavailable.
 

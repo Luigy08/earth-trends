@@ -15,6 +15,7 @@ function persistentState<State extends StoredState>(state: State): State {
 export function useQuerySession<State extends StoredState>(sessionId: string, workflow: QuerySessionWorkflow, state: State | null,
   restore: (state: State) => void, onSessionUpdated: (session: ConversationSession) => void, onError: (message: string) => void) {
   const [loaded, setLoaded] = useState(false);
+  const [restoreFailed, setRestoreFailed] = useState(false);
   const saveQueue = useRef(Promise.resolve());
   const pendingSave = useRef<(() => void) | null>(null);
   const savedSnapshot = useRef('');
@@ -31,7 +32,7 @@ export function useQuerySession<State extends StoredState>(sessionId: string, wo
         callbacks.current.restore(stored as State);
       }
       setLoaded(true);
-    }).catch(cause => { if (active) callbacks.current.onError(`Could not restore this session: ${cause instanceof Error ? cause.message : 'unknown error'}`); });
+    }).catch(cause => { if (active) { setRestoreFailed(true); callbacks.current.onError(`Could not restore this session: ${cause instanceof Error ? cause.message : 'unknown error'}`); } });
     return () => { active = false; };
   }, [sessionId]);
 
@@ -52,5 +53,5 @@ export function useQuerySession<State extends StoredState>(sessionId: string, wo
   }, [loaded, sessionId, workflow, state]);
 
   useEffect(() => () => { pendingSave.current?.(); }, []);
-  return loaded;
+  return loaded || restoreFailed;
 }

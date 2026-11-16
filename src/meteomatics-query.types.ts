@@ -13,3 +13,5 @@ export interface MeteomaticsDisplayResult {
   status: string | null;
   version: string | null;
 }
+
+export type QueryChartType = 'auto' | 'points' | 'line' | 'bar';

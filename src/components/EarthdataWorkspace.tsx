@@ -9,6 +9,7 @@ import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
 import { DictationButton } from './DictationButton';
+import { SessionLoading } from './SessionLoading';
 
 type ChatLine = { role: 'user' | 'assistant'; content: string };
 const errorText = (cause: unknown) => {
@@ -110,6 +111,8 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
         renderInput={params => <TextField {...params} label="Stored places" placeholder="Place name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxZones} · any other place on Earth can be typed in the message` : ''} />}
         renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.name}</strong>{option.kind === 'point' ? ` · ${option.latitude}, ${option.longitude}` : ` · ${option.country}`}</span></li>} />
     </Popover></>;
+
+  if (!loaded) return <SessionLoading />;
 
   return <section className={`chat-workspace ${empty ? 'is-empty' : ''}`} aria-label="NASA Earthdata query assistant">
     {empty && <ChatGreeting />}

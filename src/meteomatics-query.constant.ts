@@ -1,0 +1,1 @@
+export const LARGE_CHART_POINT_THRESHOLD = 30_000;

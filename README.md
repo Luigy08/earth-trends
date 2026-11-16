@@ -1,35 +1,84 @@
 # Earth Trend Detective
 
-NASA Space Apps POC for natural-language climate questions, historical temperature and precipitation trend analysis using Meteomatics, comparisons across locations or time periods, and current conditions.
+Earth Trend Detective is a web application for exploring how environmental variables change over time. It turns a question about a place and period into visual evidence, coverage information, and, when the data supports it, a statistical estimate of a linear trend.
 
-## Development
+The project addresses the NASA Space Apps Challenge [Be An Earth System Trend Detective!](https://www.spaceappschallenge.org/2026/challenges/earth-system-trend-detective/): select Earth science variables, visualize their evolution, and investigate **what is changing, where, by how much, and whether the change is statistically significant**.
 
-Requires Node.js 22 and Firebase CLI. Install dependencies with `npm install` and `npm --prefix functions install`. Copy `.env.example` to `.env.local` and provide the public Firebase web app configuration and CARTO basemap API key. Run `npm run dev` to start the web app.
+## From the challenge to the application
 
-Firebase web configuration and the CARTO basemap key are public client-side values, not administrative credentials. Never prefix Meteomatics credentials with `VITE_`.
+| Challenge question | How the project addresses it |
+| --- | --- |
+| What is changing? | Explore temperature and precipitation in the trend workflow, or browse additional variables in the NASA Giovanni and Earthdata workflows. |
+| Where is it changing? | Select a geocoded location, compare two locations, or explore stored satellite averages for departments of Honduras. Coordinates and source context accompany results. |
+| How much is it changing? | View monthly and annual observations and, when supported, a linear slope per decade with a 95% confidence interval. |
+| Is the change significant? | The trend workflow reports a p-value and significance at the 0.05 threshold, subject to its coverage requirements. |
 
-## Infrastructure
+NASA data is available through Giovanni and AppEEARS integrations. Meteomatics is a separate commercial data source and is not NASA data. Availability of each source depends on credentials, provider access, coverage, and, for stored data, successful ingestion; the presence of an integration does not guarantee live access.
 
-Firebase project: `earth-trend-detective`. Functions and Firestore region: `us-central1`. Vertex AI location: `global`. Enable Google Authentication and authorize the app domain. App Check is disabled for this test project; callable functions still require Google Authentication.
+## How to investigate
 
-The project uses the Blaze plan. A reference USD 10 budget alert was configured; alerts do not cap usage. The backend limits analyses per session and day and sets a maximum of two instances per function.
+1. Sign in with Google and choose a workflow in **Explore**.
+2. Ask a question in English, including the variable, location, and dates. The assistant interprets the request and asks for clarification when needed.
+3. Review the proposed request and confirm it. For trend analysis, select either NASA Giovanni or Meteomatics as the historical source.
+4. Explore the returned series and source information. Trend results include coverage, the estimated slope, uncertainty, and statistical evidence when inference is supported.
+5. For trend results with observations, download the data and provenance as CSV or use the print dialog to save a PDF report. Sessions and analyses can be revisited from the sidebar.
 
-## Meteomatics
+For example, choose **Trend analysis** and ask: “How has temperature changed in Tegucigalpa since 2000?” A second city or a second period can be included for comparison. A trend is an estimate over the selected period, not an explanation of its cause.
 
-Configure `METEOMATICS_USERNAME` and `METEOMATICS_PASSWORD` in Firebase Secret Manager and enable them as described in `functions/.env.example`. Do not commit these secrets. Without credentials or suitable historical-data access, the app reports the analysis source as unavailable; it does not substitute another provider.
+## Workflows and data
 
-To upload credentials from the ignored local file, run `node scripts/configure-meteomatics.mjs deployment-account@example.com`. The script does not print the secret values. Then set `METEOMATICS_USE_SECRET_MANAGER=true` in the Functions environment and redeploy.
+- **Trend analysis:** analyzes temperature or precipitation for a location, compares two locations over common complete years, or compares two periods at one location. Each analysis uses one provider; data from different providers are not spliced together. Giovanni uses MERRA-2 point data from the nearest grid cell. Meteomatics uses historical daily aggregates, subject to account entitlement.
+- **NASA Giovanni data:** queries a curated catalog of NASA Earth science variables for a point and date range. The reviewed request returns provider series and source details. This is a separate exploratory workflow from the temperature and precipitation analysis.
+- **NASA Earthdata:** explores satellite data from NASA AppEEARS stored as averages over departments of Honduras. Its catalog and results depend on data ingested into the project's PostgreSQL store. Department boundaries are from geoBoundaries / OpenStreetMap contributors.
+- **Meteomatics data:** builds and confirms requests to the Meteomatics Weather API, checks source availability, and displays provider results. Supported parameters and coverage depend on the account and source.
 
-## Build and deployment
+Current Meteomatics conditions are shown separately from historical analysis. Instantaneous temperature and hourly precipitation are not included in climate trend calculations.
 
-Run `npm run build`, `npm test`, `npm --prefix functions run build`, and `npm --prefix functions test`. Authenticate Firebase CLI with the project owner account. Deploy a preview using `firebase hosting:channel:deploy preview --expires 7d --project earth-trend-detective`; deploy services and web using `firebase deploy --project earth-trend-detective`.
+## How trend analysis works
 
-## Scientific interpretation
+The server validates the request, retrieves observations from the selected provider, and converts complete daily records into monthly values. A year is included only when it has 12 distinct valid months. Annual temperature is the calendar-day-weighted mean of monthly temperatures; annual precipitation is the sum of monthly totals. Missing values are not interpolated.
 
-Historical analysis uses Meteomatics daily aggregates for `t_mean_2m_24h:C` and `precip_24h:mm`. The adapter converts complete daily records into monthly values; only years with 12 valid months are retained. Annual temperature is a calendar-day-weighted mean and annual precipitation is the sum of monthly totals. Historical coverage depends on the Meteomatics account entitlement and requested source.
+A linear trend is inferred only when at least **10 complete years** and **80% of the requested years** are available. These are operational thresholds for this proof of concept, not a universal definition of adequate climate data. The application fits ordinary least squares against calendar years and uses Newey–West autocorrelation-robust uncertainty to report the slope per decade, a 95% confidence interval, and a two-sided p-value. Results below the threshold remain descriptive and explicitly report insufficient data.
 
-The slope and its interval are calculated in code, with Newey–West covariance for autocorrelation. The operational threshold for inference is 10 valid years and 80% coverage. Missing values are not interpolated. Lack of statistical significance does not demonstrate lack of change. Gemini explains calculated metrics and does not make causal claims.
+Location comparisons use complete years common to both locations. Period comparisons retain each period's own coverage; differences are descriptive and are not presented as a statistical test of the difference. Anomalies are displayed only when all 30 baseline years from 1991–2020 are complete.
 
-Meteomatics provides recent conditions separately: instantaneous temperature and hourly precipitation are not equivalent to monthly averages or totals. The valid time, provider, and data type are shown.
+A non-significant result does not prove that nothing changed. A significant trend does not establish its cause. Provider outages and missing coverage are reported separately from statistical results. The numerical analysis and report are calculated by the server; Gemini can help interpret a question and add a qualitative explanation, with a deterministic report available when generated text is unsuitable or unavailable.
 
-Sources: [Meteomatics](https://www.meteomatics.com/en/api/getting-started/), [NASA Giovanni](https://giovanni.gsfc.nasa.gov/giovanni/), [Open-Meteo Geocoding](https://open-meteo.com/en/docs/geocoding-api), [CARTO Basemaps](https://carto.com/basemaps/apikey/).
+## Architecture
+
+- **Interface:** React, TypeScript, Vite, MUI, Recharts, and Leaflet.
+- **Application backend:** Firebase Functions v2, Firestore, Firebase Authentication, Genkit, and Vertex AI. Analysis requests are processed asynchronously and saved with their results and provenance.
+- **Data providers:** NASA GES DISC Giovanni, NASA AppEEARS, Meteomatics, and Open-Meteo geocoding. The Balam ingestion subsystem stores multi-source data in PostgreSQL through Prisma.
+- **Access and limits:** authenticated callable functions validate requests and apply quotas; Firestore rules protect user-owned data and server-only collections. App Check enforcement is configurable and is disabled in the example configuration.
+
+For backend contracts, detailed scientific methods, credentials, and operational configuration, see [functions/README.md](functions/README.md) and [the data source documentation](functions/src/datasources/README.md).
+
+## Run locally
+
+Prerequisites: Node.js 22, a Firebase project configured for Google sign-in, and access to the services required by the workflows you want to use.
+
+```bash
+npm install
+npm --prefix functions install
+cp .env.example .env.local
+npm run dev
+```
+
+Fill `.env.local` with the Firebase web app configuration and, if used, the public CARTO basemap key. Set `VITE_USE_FIREBASE_EMULATORS` as appropriate. The frontend needs a configured backend or running Firebase emulators for live workflows; starting Vite alone does not create provider access.
+
+Backend environment names are documented in [functions/.env.example](functions/.env.example). Gemini uses Vertex AI credentials; Giovanni requires NASA Earthdata access; Meteomatics requires account credentials and suitable data entitlement. The AppEEARS workflow also requires a configured PostgreSQL store and ingested data. Keep provider credentials and database URLs in server-side secrets or ignored local files, never in `VITE_` variables or source control.
+
+To build the frontend and backend:
+
+```bash
+npm run build
+npm --prefix functions run build
+```
+
+## References
+
+- [NASA Space Apps challenge](https://www.spaceappschallenge.org/2026/challenges/earth-system-trend-detective/)
+- [NASA Giovanni](https://giovanni.gsfc.nasa.gov/giovanni/)
+- [NASA AppEEARS](https://appeears.earthdatacloud.nasa.gov/)
+- [Meteomatics Weather API](https://www.meteomatics.com/en/api/getting-started/)
+- [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api)

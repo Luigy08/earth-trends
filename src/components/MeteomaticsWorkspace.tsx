@@ -8,6 +8,7 @@ import { useQuerySession } from '../analysis/useQuerySession';
 import { MeteomaticsResponse } from './MeteomaticsResponse';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
 import { DictationButton } from './DictationButton';
+import { SessionLoading } from './SessionLoading';
 
 type ChatLine = { role: 'user' | 'assistant'; content: string };
 const errorText = (cause: unknown) => {
@@ -117,6 +118,8 @@ export function MeteomaticsWorkspace({ sessionId, onSessionUpdated, tools }: { s
         renderInput={params => <TextField {...params} autoFocus label="Weather variables and parameter families" placeholder="Parameter code or name" helperText={catalog ? `Optional · up to 10 · ${catalog.parameters.length} parameters · catalog ${catalog.version}` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
         renderOption={(props, option) => <li {...props} key={option.parameter}><span><strong>{option.parameter}</strong><br />{option.description}</span></li>} />
     </Popover></>;
+
+  if (!loaded) return <SessionLoading />;
 
   return <section className={`chat-workspace ${empty ? 'is-empty' : ''}`} aria-label="Meteomatics query assistant">
     {empty && <ChatGreeting />}

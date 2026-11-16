@@ -17,6 +17,8 @@ export interface IngestTarget {
   since?: string;
   /** Maximum length of one request (range mode). */
   chunkYears?: number;
+  /** Same limit in months, for products whose area requests must be shorter than a year. Takes precedence. */
+  chunkMonths?: number;
   /** Product cadence: no new request until at least this many days are missing. */
   cadenceDays?: number;
   trailingHours?: number;

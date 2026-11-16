@@ -82,7 +82,7 @@ Zones come from geoBoundaries (gbOpen, HND, ADM1, simplified), licensed under th
 
 Targets are in `src/ingest/targets.constant.ts`: the 18 departments × land surface temperature (MOD11A1), NDVI (MOD13Q1), evapotranspiration (MOD16A2GF), surface soil moisture (SPL4SMGP) and air temperature (Meteomatics `t_2m`).
 
-- `plan()` — for each target without a request in flight: `start` = last stored date + 1 day (or the target's `since`), `end` = today. It submits **one block** (5 years by default) and records an `IngestionJob`. A range requested in the last 20 hours is not requested again (one hour when the source rejected it), and nothing is requested before the product's cadence has passed. Lookups are scoped to the target's zones, so places stored on demand never affect the scheduled targets.
+- `plan()` — for each target without a request in flight: `start` = last stored date + 1 day (or the target's `since`), `end` = today. It submits **one block** (5 years by default; half a year for daily land surface temperature, because AppEEARS caps the number of files in an area request) and records an `IngestionJob`. A range requested in the last 20 hours is not requested again (one hour when the source rejected it), and nothing is requested before the product's cadence has passed. Lookups are scoped to the target's zones, so places stored on demand never affect the scheduled targets.
 - `process()` — polls the requests in flight. A finished one is upserted into `Observation` (`INSERT … ON CONFLICT DO UPDATE`), the job is marked `done`, and `Trend` is recomputed for the affected zones. It never waits for AppEEARS.
 - Both are idempotent, so a failed or repeated run is safe. A source failure is stored as an `error` job with the provider message; it never becomes an empty series.
 
@@ -112,18 +112,20 @@ The read routes are public and limited by CORS to the Hosting domains (`BALAM_CO
 
 ## NASA Earthdata chat (frontend)
 
-The "NASA Earthdata" query mode in the web app answers for **any place on Earth** through three callables, following the Giovanni chat pattern (owner check → validation → quota → service):
+The "NASA Earthdata" query mode in the web app answers for **Honduras and Central America** (Honduras, Guatemala, El Salvador, Nicaragua, Costa Rica, Panama and Belize) through three callables, following the Giovanni chat pattern (owner check → validation → quota → service):
 
 | Callable | Notes |
 |---|---|
 | `getEarthdataCatalog` | The AppEEARS variables and the places already stored (areas and points) |
-| `interpretEarthdata` | Gemini maps the question to catalog variables, places and dates. Named places are geocoded on the server (Open-Meteo, worldwide) and registered as point zones; explicit coordinates are accepted; a stored area is used only when the user names it |
+| `interpretEarthdata` | Gemini maps the question to catalog variables, places and dates. Named places are geocoded on the server (Open-Meteo) and, when they are in the region, registered as point zones; a place outside it becomes a question and is never registered; explicit coordinates are accepted; a stored area is used only when the user names it |
 | `executeEarthdataQuery` | Reads `Observation` (source `appeears`) and answers in the Meteomatics envelope, one entry per variable and place labeled `<variable> · <place> (<pixel or area mean>):<unit>` |
 
 Two kinds of place share the `Zone` table:
 
-- **Point** (`level: 'POINT'`, id like `PT-N14082-W087207`, coordinates rounded to ~110 m): any city, landmark or coordinate. It is requested from AppEEARS as a point sample, in one request for the whole series, and answers with the product pixel at that location.
+- **Point** (`level: 'POINT'`, id like `PT-N14082-W087207`, coordinates rounded to ~110 m): any city, landmark or coordinate in the region. It is requested from AppEEARS as a point sample, in one request for the whole series, and answers with the product pixel at that location.
 - **Area** (`level: 'ADM1'`): the seeded administrative polygons (today the 18 departments of Honduras), requested as area statistics in yearly blocks by the scheduled ingestion. Whole countries or regions that are not seeded cannot be averaged; the assistant offers places inside them instead.
+
+The region is defined once, in `EARTHDATA_REGION` (`shared/earthdata-catalog.constant.ts`), and enforced by `inEarthdataRegion` when a place is interpreted, registered, listed and queried: the country must be one of the seven and the coordinates inside the bounds. Bare coordinates carry no country, so they are checked against the bounds alone and a point just across a border can pass.
 
 A query never waits for NASA. When a series is not stored, or ends more than 60 days before the requested end, `executeEarthdataQuery` asks the ingestion for it (`planPlaces` for a point, `plan({ backfill: true })` for areas; both idempotent) and says what it did: the request fails with an explicit message when nothing is stored, or returns the stored part with `notices` when a series is incomplete. Requests for points that NASA has already finished are stored at the start of the next query for that place, so submitting again shows the data; area blocks are stored by the hourly `balamIngest`. Any signed-in user can start these requests; a series already in progress is never requested twice, and a request the source rejected can be retried after one hour.
 

@@ -1,3 +1,4 @@
+import type { QueryWorkflow } from './app.types';
 import { COLORS } from './theme.constant';
 
 export const MAX_YEAR = new Date().getFullYear() - 1;
@@ -10,7 +11,12 @@ export const EXAMPLE_QUERIES = [
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const SERIES_COLORS = [COLORS.green700, COLORS.accent];
 export const CHART_VIEWS = [{ value: 'annual', label: 'Annual' }, { value: 'monthly', label: 'Monthly' }, { value: 'anomaly', label: 'Anomalies' }] as const;
-export const WORKFLOW_OPTIONS = [{ value: 'meteomatics', label: 'Meteomatics data', description: 'Raw values from the Meteomatics Weather API' }, { value: 'giovanni', label: 'NASA Giovanni data', description: 'Raw point time series from NASA GES DISC Giovanni' }, { value: 'earthdata', label: 'NASA Earthdata', description: 'NASA satellite series for any place on Earth, from AppEEARS' }, { value: 'trend', label: 'Trend analysis', description: 'Historical trends with statistical significance' }] as const;
+export const WORKFLOW_OPTIONS = [{ value: 'meteomatics', label: 'Meteomatics data', description: 'Raw values from the Meteomatics Weather API' }, { value: 'giovanni', label: 'NASA Giovanni data', description: 'Raw point time series from NASA GES DISC Giovanni' }, { value: 'earthdata', label: 'NASA Earthdata', description: 'NASA satellite series for Honduras and Central America, from AppEEARS' }, { value: 'trend', label: 'Trend analysis', description: 'Historical trends with statistical significance' }] as const;
+/**
+ * Query modes hidden from the app. NASA Earthdata is not offered until its store is loaded;
+ * remove it from this list to show the mode again (the backend is deployed).
+ */
+export const HIDDEN_WORKFLOWS: readonly QueryWorkflow[] = ['earthdata'];
 /** Accessible names of the query assistants that share the chat layout. */
 export const QUERY_ASSISTANT_NAMES = { meteomatics: 'Meteomatics', giovanni: 'NASA Giovanni', earthdata: 'NASA Earthdata', trend: 'trend' } as const;
 export const HISTORICAL_SOURCE_OPTIONS = [

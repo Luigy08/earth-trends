@@ -5,6 +5,8 @@ import { GIOVANNI_VARIABLES } from '../../shared/giovanni-catalog.constant';
 import { GIOVANNI_ASSISTANT_PROMPT } from './giovanni-assistant.constant';
 import { EARTHDATA_ASSISTANT_PROMPT } from './earthdata-assistant.constant';
 import type { EarthdataZone } from '../../shared/earthdata.types';
+import { EARTHDATA_REGION } from '../../shared/earthdata-catalog.constant';
+import { inEarthdataRegion } from '../../shared/earthdata.resolver';
 import type { ParsedIntent } from './backend.types';
 import { CONFIG } from './config.constant';
 import { analysisSpecSchema } from './validation';
@@ -297,12 +299,21 @@ export async function interpretEarthdataQuery(query: string, locations: Location
     const located = await locatePoint(place, locations);
     if (!located.point) { if (located.question) clarificationQuestions.push(located.question); continue; }
     const [name = place, ...rest] = (located.locationLabel ?? place).split(', ');
-    const zone = await registerPlace({ ...located.point, name: located.locationLabel ?? name, ...(rest.length ? { country: rest[rest.length - 1] } : {}) });
+    const country = rest.length ? rest[rest.length - 1] : undefined;
+    if (!inEarthdataRegion({ ...located.point, country })) {
+      clarificationQuestions.push(`${located.locationLabel ?? name} is outside ${EARTHDATA_REGION.name}, the only region this mode covers. Which place in Central America would you like instead?`);
+      continue;
+    }
+    const zone = await registerPlace({ ...located.point, name: located.locationLabel ?? name, ...(country ? { country } : {}) });
     selected.set(zone.id, zone);
   }
   for (const point of value.points.slice(0, 4)) {
     if (!Number.isFinite(point.latitude) || !Number.isFinite(point.longitude) || Math.abs(point.latitude) > 90 || Math.abs(point.longitude) > 180) {
       clarificationQuestions.push('Those coordinates are out of range. Latitude goes from -90 to 90 and longitude from -180 to 180.');
+      continue;
+    }
+    if (!inEarthdataRegion(point)) {
+      clarificationQuestions.push(`The coordinates ${point.latitude}, ${point.longitude} are outside ${EARTHDATA_REGION.name}, the only region this mode covers. Which place in Central America would you like instead?`);
       continue;
     }
     const zone = await registerPlace({ latitude: point.latitude, longitude: point.longitude, name: `${point.latitude.toFixed(3)}, ${point.longitude.toFixed(3)}` });

@@ -5,3 +5,24 @@
 .comparison-legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:6px 0 4px;font-size:.85rem}.comparison-swatch{display:inline-block;width:14px;height:4px;border-radius:2px;margin-left:8px}.comparison-swatch:first-child{margin-left:0}.comparison-swatch.a{background:var(--color-chart-blue)}.comparison-swatch.b{background:var(--color-chart-amber)}
 .comparison-report{margin:16px 0;padding:16px 18px;border:1px solid var(--color-line-100);border-radius:12px;background:var(--color-paper)}.comparison-report-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}.comparison-report h4{margin:14px 0 4px}.comparison-report ul{margin:0;padding-left:20px}.comparison-report li{margin:4px 0;line-height:1.5}
 .comparison-result table{width:100%;border-collapse:collapse;font-size:.82rem}.comparison-result th,.comparison-result td{padding:7px 10px;border-bottom:1px solid var(--color-line-100);text-align:left;vertical-align:top}.comparison-result tbody th{font-weight:600}
+/* PDF export of a single query result: printElement() marks the result and its ancestor path. */
+.print-only{display:none}
+@media print{
+html.print-single .print-path>:not(.print-path):not(.print-target){display:none!important}
+html.print-single main.chat-main{padding:0}html.print-single .chat-workspace{max-width:none}html.print-single .chat-thread{padding:0}
+.print-target{margin:0!important}
+.print-target:before{content:'EARTH TREND DETECTIVE / QUERY RESULT REPORT';display:block;font-size:9pt;letter-spacing:1.5px;color:var(--color-green-800);margin-bottom:16px}
+.print-target .screen-only,.print-target .MuiButton-root,.print-target .meteo-chart .MuiTextField-root,.print-target .meteo-chart label,.print-target>pre{display:none!important}
+.print-target .print-only{display:block}
+.print-target .meteo-response-table-wrap{max-height:none;overflow:visible}
+.print-target .meteo-response-table-wrap .MuiTableHead-root{position:static}
+.print-target .meteo-response-table-wrap .MuiTableCell-root{font-size:7.5pt;padding:4px 8px}
+.print-target .meteo-response-table-wrap table:not(.MuiTable-root){width:100%;font-size:7pt}
+.print-target .meteo-response-table-wrap>p{margin:8px 10px;font-size:8pt}
+.print-target .recharts-responsive-container,.print-target .recharts-wrapper{width:100%!important;height:auto!important;max-height:none!important}
+.print-target .recharts-surface{width:100%!important;height:auto!important}
+.print-target .meteo-chart-plot,.print-target .meteo-chart-summary,.print-target tr{break-inside:avoid}
+.print-target details>summary{list-style:none;font-weight:600}.print-target details>summary::-webkit-details-marker{display:none}
+.print-target pre{max-height:none;overflow:visible;white-space:pre-wrap;word-break:break-word;font-size:8pt}
+.print-target p{font-size:9pt}
+}

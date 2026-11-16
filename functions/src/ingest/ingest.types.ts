@@ -1,4 +1,4 @@
-import type { MultiPolygon, Polygon } from 'geojson';
+import type { MultiPolygon, Point, Polygon } from 'geojson';
 import type { JobStatus } from '../datasources/datasources.types';
 
 /** What the scheduled ingestion preloads for every zone of `zoneLevel`. */
@@ -35,7 +35,8 @@ export interface ZoneRecord {
   country: string;
   centroidLat: number;
   centroidLon: number;
-  geometry: Polygon | MultiPolygon;
+  /** A polygon for administrative zones (area statistics); a point for any other place on Earth (pixel sample). */
+  geometry: Polygon | MultiPolygon | Point;
 }
 
 /** One daily value per variable, source and zone. `date` is YYYY-MM-DD. */
@@ -125,9 +126,12 @@ export interface TrendOptions {
 /** Persistence used by the ingestion service. Implemented with Prisma in production and in memory in tests. */
 export interface IngestRepository {
   listZones(level: string): Promise<ZoneRecord[]>;
-  lastObservationDate(variableId: string, source: string): Promise<string | null>;
-  hasActiveJob(variableId: string, source: string): Promise<boolean>;
-  latestJobStartingAt(variableId: string, source: string, start: string): Promise<IngestionJobRecord | null>;
+  getZones(ids: string[]): Promise<ZoneRecord[]>;
+  upsertZone(zone: ZoneRecord): Promise<void>;
+  /** The three lookups below are scoped to `zoneIds`: zones of different kinds are ingested independently. */
+  lastObservationDate(variableId: string, source: string, zoneIds: string[]): Promise<string | null>;
+  hasActiveJob(variableId: string, source: string, zoneIds: string[]): Promise<boolean>;
+  latestJobStartingAt(variableId: string, source: string, start: string, zoneIds: string[]): Promise<IngestionJobRecord | null>;
   createJob(job: NewIngestionJob): Promise<IngestionJobRecord>;
   updateJob(id: string, patch: Partial<Pick<IngestionJobRecord, 'status' | 'error'>>): Promise<void>;
   listActiveJobs(): Promise<IngestionJobRecord[]>;
@@ -148,6 +152,13 @@ export interface PlanRequest {
   from?: string;
   to?: string;
   /** Request again even when the same range was requested recently. */
+  force?: boolean;
+}
+
+/** On-demand request for specific places (point zones), outside the scheduled targets. */
+export interface PlacePlanRequest {
+  zoneIds: string[];
+  variableIds?: string[];
   force?: boolean;
 }
 

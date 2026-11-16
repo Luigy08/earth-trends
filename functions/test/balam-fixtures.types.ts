@@ -31,7 +31,7 @@ export const ZONES: ZoneRecord[] = [
   { id: 'HN-FM', name: 'Francisco Morazán', level: 'ADM1', country: 'HN', centroidLat: 14.2, centroidLon: -87.2, geometry: square(-87.7, 13.7) },
 ];
 
-export const ZONE_REFS: ZoneRef[] = ZONES.map((z) => ({ id: z.id, geometry: z.geometry, centroid: { lat: z.centroidLat, lon: z.centroidLon } }));
+export const ZONE_REFS: ZoneRef[] = ZONES.flatMap((z) => (z.geometry.type === 'Point' ? [] : [{ id: z.id, geometry: z.geometry, centroid: { lat: z.centroidLat, lon: z.centroidLon } }]));
 
 /* ---------- In-memory store ---------- */
 
@@ -47,15 +47,17 @@ export class MemoryBalamRepository implements IngestRepository, BalamReadReposit
   constructor(public zoneRecords: ZoneRecord[] = ZONES) {}
 
   async listZones(level: string) { return this.zoneRecords.filter((z) => z.level === level); }
-  async lastObservationDate(variableId: string, source: string) {
-    const dates = [...this.observations.values()].filter((o) => o.variableId === variableId && o.source === source).map((o) => o.date).sort();
+  async getZones(ids: string[]) { return this.zoneRecords.filter((z) => ids.includes(z.id)); }
+  async upsertZone(zone: ZoneRecord) { this.zoneRecords = [...this.zoneRecords.filter((z) => z.id !== zone.id), zone]; }
+  async lastObservationDate(variableId: string, source: string, zoneIds: string[]) {
+    const dates = [...this.observations.values()].filter((o) => o.variableId === variableId && o.source === source && zoneIds.includes(o.zoneId)).map((o) => o.date).sort();
     return dates[dates.length - 1] ?? null;
   }
-  async hasActiveJob(variableId: string, source: string) {
-    return this.jobs.some((j) => j.variableId === variableId && j.source === source && (j.status === 'pending' || j.status === 'processing'));
+  async hasActiveJob(variableId: string, source: string, zoneIds: string[]) {
+    return this.jobs.some((j) => j.variableId === variableId && j.source === source && (j.status === 'pending' || j.status === 'processing') && j.zoneIds.some((id) => zoneIds.includes(id)));
   }
-  async latestJobStartingAt(variableId: string, source: string, start: string) {
-    return [...this.jobs].reverse().find((j) => j.variableId === variableId && j.source === source && j.start === start) ?? null;
+  async latestJobStartingAt(variableId: string, source: string, start: string, zoneIds: string[]) {
+    return [...this.jobs].reverse().find((j) => j.variableId === variableId && j.source === source && j.start === start && j.zoneIds.some((id) => zoneIds.includes(id))) ?? null;
   }
   async createJob(job: NewIngestionJob) {
     const record: IngestionJobRecord = { ...job, id: `job-${this.jobs.length + 1}`, createdAt: this.clock() };
@@ -77,8 +79,8 @@ export class MemoryBalamRepository implements IngestRepository, BalamReadReposit
   async upsertTrend(trend: TrendRecord) { this.trendRecords.set(`${trend.variableId}|${trend.source}|${trend.zoneId}`, trend); }
   async deleteQueryJob(queryJobId: string) { this.deletedQueryJobs.push(queryJobId); }
 
-  async zones(withGeometry: boolean): Promise<ZoneSummary[]> {
-    return this.zoneRecords.map(({ geometry, ...zone }) => (withGeometry ? { ...zone, geometry } : zone));
+  async zones(withGeometry: boolean, ids?: string[]): Promise<ZoneSummary[]> {
+    return this.zoneRecords.filter((z) => !ids || ids.includes(z.id)).map(({ geometry, ...zone }) => (withGeometry ? { ...zone, geometry } : zone));
   }
   async series(filter: SeriesFilter) {
     return [...this.observations.values()]
@@ -90,6 +92,15 @@ export class MemoryBalamRepository implements IngestRepository, BalamReadReposit
     return [...this.trendRecords.values()]
       .filter((t) => t.variableId === filter.variableId && (!filter.zoneIds || filter.zoneIds.includes(t.zoneId)) && (!filter.source || t.source === filter.source))
       .map((t) => ({ ...t, updatedAt: '2026-11-15T00:00:00.000Z' }));
+  }
+  async seriesCoverage(variableIds: string[], zoneIds: string[], source: string) {
+    const groups = new Map<string, { variableId: string; zoneId: string; firstDate: string; lastDate: string }>();
+    for (const o of this.observations.values()) {
+      if (o.source !== source || !variableIds.includes(o.variableId) || !zoneIds.includes(o.zoneId)) continue;
+      const g = groups.get(`${o.variableId}|${o.zoneId}`) ?? { variableId: o.variableId, zoneId: o.zoneId, firstDate: o.date, lastDate: o.date };
+      groups.set(`${o.variableId}|${o.zoneId}`, { ...g, firstDate: g.firstDate < o.date ? g.firstDate : o.date, lastDate: g.lastDate > o.date ? g.lastDate : o.date });
+    }
+    return [...groups.values()];
   }
   async activeIngestions() {
     return this.jobs.filter((j) => j.status === 'pending' || j.status === 'processing').map(({ variableId, source }) => ({ variableId, source }));

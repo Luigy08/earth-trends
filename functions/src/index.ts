@@ -49,7 +49,13 @@ const callableOptions = { enforceAppCheck: CONFIG.enforceAppCheck, timeoutSecond
 const meteomaticsCallableOptions = { ...callableOptions, secrets: processingSecrets };
 const giovanniCallableOptions = { ...callableOptions, secrets: giovanniSecrets };
 // The Earthdata workflow reads the Balam store. Only running a query can ask NASA for missing data, so only it binds the provider secrets.
-const earthdataQueries = new EarthdataQueryProvider(getBalamRepository, INGEST_TARGETS, variableIds => getBalamIngest().plan({ variableIds, backfill: true }));
+const earthdataQueries = new EarthdataQueryProvider(getBalamRepository, INGEST_TARGETS, {
+  ensureAreas: variableIds => getBalamIngest().plan({ variableIds, backfill: true }),
+  ensurePlace: (variableIds, zoneId) => getBalamIngest().planPlaces({ variableIds, zoneIds: [zoneId] }),
+  // Only single-place requests are stored inside a query: they are small. Area blocks are left to the scheduled run.
+  collectPlaces: async zoneIds => { await getBalamIngest().process({ deadlineMs: 45_000, filter: job => job.zoneIds.length === 1 && zoneIds.includes(job.zoneIds[0]!) }); },
+  savePlace: zone => getBalamRepository().upsertZone(zone),
+});
 const earthdataCallableOptions = { ...callableOptions, secrets: balamDatabaseSecrets };
 const earthdataExecuteOptions = { ...callableOptions, secrets: balamSecrets };
 
@@ -269,7 +275,7 @@ export const interpretEarthdata = onCall(earthdataCallableOptions, async (reques
   const ownerId = requireOwner(request);
   const input = parseInput(interpretEarthdataSchema, request.data);
   await consumeQuota(db, ownerId, 'interpretQuery');
-  try { return await interpretEarthdataQuery(input.query, locations, await earthdataQueries.catalog(), (latitude, longitude) => earthdataQueries.zoneAt(latitude, longitude)); }
+  try { return await interpretEarthdataQuery(input.query, locations, await earthdataQueries.catalog(), location => earthdataQueries.place(location)); }
   catch (error) {
     logger.warn('Earthdata request interpretation failed', { kind: error instanceof Error ? error.name : 'unknown' });
     throw new HttpsError('unavailable', 'The NASA Earthdata assistant is unavailable. Try again later.');

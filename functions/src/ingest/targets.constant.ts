@@ -23,3 +23,7 @@ export const INGEST_TARGETS: readonly IngestTarget[] = [
 export const DEFAULT_CHUNK_YEARS = 5;
 /** A range that was already requested is not requested again within this window. */
 export const RECHECK_HOURS = 20;
+/** A request the source rejected may be retried sooner, without hammering a source that is down. */
+export const ERROR_RECHECK_HOURS = 1;
+/** Level of zones created on demand for any place on Earth. */
+export const POINT_ZONE_LEVEL = 'POINT';

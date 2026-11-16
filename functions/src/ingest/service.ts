@@ -1,11 +1,11 @@
-import type { BalamQuery, TimeRange, ZoneRef } from '../datasources/datasources.types';
+import type { BalamQuery, Location, TimeRange } from '../datasources/datasources.types';
 import { parseParameter } from '../datasources/param-string';
 import type { DataSourceRegistry } from '../datasources/registry';
 import type {
-  IngestRepository, IngestTarget, IngestionJobRecord, PlanRequest, PlanSummary, ProcessSummary, TrendOptions, ZoneRecord,
+  IngestRepository, IngestTarget, IngestionJobRecord, PlacePlanRequest, PlanRequest, PlanSummary, ProcessSummary, TrendOptions, ZoneRecord,
 } from './ingest.types';
 import { addDays, daysBetween, fromDateString, sourceOf, splitRange, toDateString, toObservationRows, trailingWindow } from './ingest.resolver';
-import { DEFAULT_CHUNK_YEARS, INGEST_TARGETS, RECHECK_HOURS } from './targets.constant';
+import { DEFAULT_CHUNK_YEARS, ERROR_RECHECK_HOURS, INGEST_TARGETS, RECHECK_HOURS } from './targets.constant';
 import { computeTrend } from './trends';
 
 export interface IngestOptions {
@@ -13,6 +13,7 @@ export interface IngestOptions {
   now?: () => Date;
   trend?: TrendOptions;
   recheckHours?: number;
+  errorRecheckHours?: number;
 }
 
 interface Window {
@@ -22,14 +23,15 @@ interface Window {
 }
 
 /**
- * Keeps PostgreSQL in step with the sources. Both entry points are short and idempotent:
- * `plan` only submits requests and `process` only collects the ones that already finished,
- * so a run never waits for an asynchronous source.
+ * Keeps PostgreSQL in step with the sources. Every entry point is short and idempotent:
+ * `plan` and `planPlaces` only submit requests and `process` only collects the ones that already
+ * finished, so a run never waits for an asynchronous source.
  */
 export class IngestService {
   private readonly targets: readonly IngestTarget[];
   private readonly now: () => Date;
   private readonly recheckMs: number;
+  private readonly errorRecheckMs: number;
 
   constructor(
     private readonly repo: IngestRepository,
@@ -39,49 +41,55 @@ export class IngestService {
     this.targets = options.targets ?? INGEST_TARGETS;
     this.now = options.now ?? (() => new Date());
     this.recheckMs = (options.recheckHours ?? RECHECK_HOURS) * 3_600_000;
+    this.errorRecheckMs = (options.errorRecheckHours ?? ERROR_RECHECK_HOURS) * 3_600_000;
   }
 
-  /** Submits the next missing range of every target that has no request in flight. */
+  /** Scheduled targets: submits the next missing range of each one for all zones of its level. */
   async plan(request: PlanRequest = {}): Promise<PlanSummary> {
     const summary: PlanSummary = { created: [], skipped: [], rows: 0 };
     const zonesByLevel = new Map<string, ZoneRecord[]>();
     const selected = request.variableIds ? this.targets.filter((t) => request.variableIds!.includes(t.variableId)) : this.targets;
 
     for (const target of selected) {
-      const source = sourceOf(target.parameter);
-      const skip = (reason: string) => summary.skipped.push({ variableId: target.variableId, source, reason });
+      let zones = zonesByLevel.get(target.zoneLevel);
       try {
-        if (await this.repo.hasActiveJob(target.variableId, source)) {
-          skip('A request is already in progress');
-          continue;
-        }
-        let zones = zonesByLevel.get(target.zoneLevel);
         if (!zones) {
           zones = await this.repo.listZones(target.zoneLevel);
           zonesByLevel.set(target.zoneLevel, zones);
         }
-        if (!zones.length) {
-          skip(`No ${target.zoneLevel} zones are loaded`);
-          continue;
-        }
-        const windows = await this.windowsFor(target, source, request);
-        if (typeof windows === 'string') {
-          skip(windows);
-          continue;
-        }
-        for (const window of windows) await this.submit(target, source, zones, window, request.force === true, summary);
       } catch (error) {
-        skip(error instanceof Error ? error.message : 'Planning failed');
+        summary.skipped.push({ variableId: target.variableId, source: sourceOf(target.parameter), reason: error instanceof Error ? error.message : 'Planning failed' });
+        continue;
       }
+      if (!zones.length) {
+        summary.skipped.push({ variableId: target.variableId, source: sourceOf(target.parameter), reason: `No ${target.zoneLevel} zones are loaded` });
+        continue;
+      }
+      await this.planTarget(target, zones, request, summary, { chunked: true });
     }
     return summary;
   }
 
-  /** Polls every request in flight and stores the ones that finished. */
-  async process(options: { deadlineMs?: number } = {}): Promise<ProcessSummary> {
+  /**
+   * On-demand places: requests the whole missing series of each range target for the given zones, one zone
+   * at a time. A place is a single pixel series, so it goes out as one request instead of yearly blocks.
+   */
+  async planPlaces(request: PlacePlanRequest): Promise<PlanSummary> {
+    const summary: PlanSummary = { created: [], skipped: [], rows: 0 };
+    const zones = await this.repo.getZones(request.zoneIds);
+    const selected = this.targets.filter((t) => t.mode === 'range' && (!request.variableIds || request.variableIds.includes(t.variableId)));
+    for (const zone of zones) {
+      for (const target of selected) await this.planTarget(target, [zone], { backfill: true, force: request.force }, summary, { chunked: false });
+    }
+    return summary;
+  }
+
+  /** Polls requests in flight and stores the ones that finished. `filter` narrows the run to some jobs. */
+  async process(options: { deadlineMs?: number; filter?: (job: IngestionJobRecord) => boolean } = {}): Promise<ProcessSummary> {
     const summary: ProcessSummary = { done: [], waiting: [], failed: [], deferred: 0 };
     const stopAt = options.deadlineMs ? Date.now() + options.deadlineMs : Infinity;
     for (const job of await this.repo.listActiveJobs()) {
+      if (options.filter && !options.filter(job)) continue;
       if (Date.now() >= stopAt) {
         summary.deferred++;
         continue;
@@ -101,8 +109,28 @@ export class IngestService {
 
   /* ---------- Planning ---------- */
 
-  private async windowsFor(target: IngestTarget, source: string, request: PlanRequest): Promise<Window[] | string> {
-    const last = await this.repo.lastObservationDate(target.variableId, source);
+  private async planTarget(target: IngestTarget, zones: ZoneRecord[], request: PlanRequest, summary: PlanSummary, mode: { chunked: boolean }): Promise<void> {
+    const source = sourceOf(target.parameter);
+    const zoneIds = zones.map((z) => z.id);
+    const skip = (reason: string) => summary.skipped.push({ variableId: target.variableId, source, reason });
+    try {
+      if (await this.repo.hasActiveJob(target.variableId, source, zoneIds)) {
+        skip('A request is already in progress');
+        return;
+      }
+      const windows = await this.windowsFor(target, source, zoneIds, request, mode.chunked);
+      if (typeof windows === 'string') {
+        skip(windows);
+        return;
+      }
+      for (const window of windows) await this.submit(target, source, zones, window, request.force === true, summary);
+    } catch (error) {
+      skip(error instanceof Error ? error.message : 'Planning failed');
+    }
+  }
+
+  private async windowsFor(target: IngestTarget, source: string, zoneIds: string[], request: PlanRequest, chunked: boolean): Promise<Window[] | string> {
+    const last = await this.repo.lastObservationDate(target.variableId, source, zoneIds);
     if (target.mode === 'trailing') {
       const { time, label } = trailingWindow(this.now(), target.trailingHours ?? 24, target.utcOffsetHours ?? 0);
       if (last && last >= label) return 'Up to date';
@@ -114,7 +142,7 @@ export class IngestService {
     if (!start) return 'The target has no start date';
     if (start > end) return 'Up to date';
     if (!request.from && last && daysBetween(last, end) < (target.cadenceDays ?? 1)) return 'Up to date for the product cadence';
-    const chunks = splitRange(start, end, target.chunkYears ?? DEFAULT_CHUNK_YEARS);
+    const chunks = chunked ? splitRange(start, end, target.chunkYears ?? DEFAULT_CHUNK_YEARS) : [{ start, end }];
     return (request.backfill ? chunks : chunks.slice(0, 1)).map((chunk) => ({
       ...chunk,
       time: { start: fromDateString(chunk.start), end: fromDateString(chunk.end), step: target.step },
@@ -122,15 +150,18 @@ export class IngestService {
   }
 
   private async submit(target: IngestTarget, source: string, zones: ZoneRecord[], window: Window, force: boolean, summary: PlanSummary): Promise<void> {
-    const previous = await this.repo.latestJobStartingAt(target.variableId, source, window.start);
-    if (!force && previous && this.now().getTime() - previous.createdAt.getTime() < this.recheckMs) {
+    const zoneIds = zones.map((z) => z.id);
+    const previous = await this.repo.latestJobStartingAt(target.variableId, source, window.start, zoneIds);
+    // A request the source rejected may be retried soon; one it accepted is given time to produce data.
+    const wait = previous?.status === 'error' ? this.errorRecheckMs : this.recheckMs;
+    if (!force && previous && this.now().getTime() - previous.createdAt.getTime() < wait) {
       summary.skipped.push({ variableId: target.variableId, source, reason: `The range starting ${window.start} was requested recently` });
       return;
     }
     const query: BalamQuery = {
       parameters: [parseParameter(target.parameter, this.registry.sourceIds)],
       time: window.time,
-      location: { kind: 'zones', zones: zones.map(toZoneRef) },
+      location: toLocation(zones),
     };
     const submitted = await this.registry.submit(query);
     const failed = submitted.parts.every((p) => p.status === 'error');
@@ -138,7 +169,7 @@ export class IngestService {
       variableId: target.variableId,
       source,
       parameter: target.parameter,
-      zoneIds: zones.map((z) => z.id),
+      zoneIds,
       start: window.start,
       end: window.end,
       status: failed ? 'error' : 'pending',
@@ -206,6 +237,14 @@ export class IngestService {
   }
 }
 
-function toZoneRef(zone: ZoneRecord): ZoneRef {
-  return { id: zone.id, geometry: zone.geometry, centroid: { lat: zone.centroidLat, lon: zone.centroidLon } };
+/** Polygons are requested as areas (zonal statistics); point zones as point samples. A request holds one kind. */
+function toLocation(zones: ZoneRecord[]): Location {
+  if (zones.every((zone) => zone.geometry.type === 'Point')) {
+    return { kind: 'points', points: zones.map((zone) => ({ lat: zone.centroidLat, lon: zone.centroidLon, id: zone.id })) };
+  }
+  return {
+    kind: 'zones',
+    zones: zones.flatMap((zone) => (zone.geometry.type === 'Point' ? []
+      : [{ id: zone.id, geometry: zone.geometry, centroid: { lat: zone.centroidLat, lon: zone.centroidLon } }])),
+  };
 }

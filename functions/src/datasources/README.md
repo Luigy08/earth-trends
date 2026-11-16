@@ -76,13 +76,13 @@ npm --prefix functions run check              # prisma generate + type-check + t
 
 `build`, `typecheck` and `test` run `prisma generate` first; the generated client lives in `src/generated/` and is not committed.
 
-Zones come from geoBoundaries (gbOpen, HND, ADM1, simplified), licensed under the **Open Data Commons Open Database License 1.0** with OpenStreetMap as the source: show the attribution wherever the boundaries are displayed. The seed simplifies the polygons (~500 m tolerance) so the whole collection fits comfortably in one AppEEARS request.
+Zones come from geoBoundaries (gbOpen, HND, ADM1, simplified), licensed under the **Open Data Commons Open Database License 1.0** with OpenStreetMap as the source: show the attribution wherever the boundaries are displayed. The seed stores the published simplified polygons as they are (about 240 KB for the 18 departments) and refuses any polygon with self-intersections: AppEEARS rejects a whole request when one feature is invalid, and simplifying further is what introduces them.
 
 ## Ingestion
 
 Targets are in `src/ingest/targets.constant.ts`: the 18 departments × land surface temperature (MOD11A1), NDVI (MOD13Q1), evapotranspiration (MOD16A2GF), surface soil moisture (SPL4SMGP) and air temperature (Meteomatics `t_2m`).
 
-- `plan()` — for each target without a request in flight: `start` = last stored date + 1 day (or the target's `since`), `end` = today. It submits **one block** (5 years by default) and records an `IngestionJob`. A range requested in the last 20 hours is not requested again, and nothing is requested before the product's cadence has passed.
+- `plan()` — for each target without a request in flight: `start` = last stored date + 1 day (or the target's `since`), `end` = today. It submits **one block** (5 years by default) and records an `IngestionJob`. A range requested in the last 20 hours is not requested again (one hour when the source rejected it), and nothing is requested before the product's cadence has passed. Lookups are scoped to the target's zones, so places stored on demand never affect the scheduled targets.
 - `process()` — polls the requests in flight. A finished one is upserted into `Observation` (`INSERT … ON CONFLICT DO UPDATE`), the job is marked `done`, and `Trend` is recomputed for the affected zones. It never waits for AppEEARS.
 - Both are idempotent, so a failed or repeated run is safe. A source failure is stored as an `error` job with the provider message; it never becomes an empty series.
 
@@ -112,15 +112,34 @@ The read routes are public and limited by CORS to the Hosting domains (`BALAM_CO
 
 ## NASA Earthdata chat (frontend)
 
-The "NASA Earthdata" query mode in the web app reads this store through three callables, following the Giovanni chat pattern (owner check → validation → quota → service):
+The "NASA Earthdata" query mode in the web app answers for **any place on Earth** through three callables, following the Giovanni chat pattern (owner check → validation → quota → service):
 
 | Callable | Notes |
 |---|---|
-| `getEarthdataCatalog` | The AppEEARS targets as variables (with their stored coverage) and the zones |
-| `interpretEarthdata` | Gemini maps the question to catalog variables, zone ids and dates. Named places are geocoded and matched to a department polygon on the server; an ambiguous place becomes a question |
-| `executeEarthdataQuery` | Reads `Observation` (source `appeears`) and answers in the Meteomatics envelope, one entry per variable and zone labeled `<variable> · <zone>:<unit>` |
+| `getEarthdataCatalog` | The AppEEARS variables and the places already stored (areas and points) |
+| `interpretEarthdata` | Gemini maps the question to catalog variables, places and dates. Named places are geocoded on the server (Open-Meteo, worldwide) and registered as point zones; explicit coordinates are accepted; a stored area is used only when the user names it |
+| `executeEarthdataQuery` | Reads `Observation` (source `appeears`) and answers in the Meteomatics envelope, one entry per variable and place labeled `<variable> · <place> (<pixel or area mean>):<unit>` |
 
-A query never waits for NASA. When a requested variable is not stored, or its stored series ends more than 60 days before the requested end, `executeEarthdataQuery` asks the ingestion for every missing block of that variable (`plan({ backfill: true })`, idempotent) and says what it did: the request fails with an explicit message when nothing is stored, or returns the stored part with `notices` when the series is incomplete. The hourly `balamIngest` stores the blocks as NASA finishes them. Any signed-in user can start these requests; a variable already in progress is never requested twice. Limits are in `shared/earthdata-catalog.constant.ts` (3 variables, 4 departments, 60,000 values per request). Chart statistics come from `earthdata-chart.resolver.ts`: a month is the mean of its valid observations, years need 12 valid months, and the trend is OLS with Newey–West under the usual 10-year / 80 % thresholds. The Meteomatics-sourced air temperature is not offered here, because this mode is labeled as NASA data.
+Two kinds of place share the `Zone` table:
+
+- **Point** (`level: 'POINT'`, id like `PT-N14082-W087207`, coordinates rounded to ~110 m): any city, landmark or coordinate. It is requested from AppEEARS as a point sample, in one request for the whole series, and answers with the product pixel at that location.
+- **Area** (`level: 'ADM1'`): the seeded administrative polygons (today the 18 departments of Honduras), requested as area statistics in yearly blocks by the scheduled ingestion. Whole countries or regions that are not seeded cannot be averaged; the assistant offers places inside them instead.
+
+A query never waits for NASA. When a series is not stored, or ends more than 60 days before the requested end, `executeEarthdataQuery` asks the ingestion for it (`planPlaces` for a point, `plan({ backfill: true })` for areas; both idempotent) and says what it did: the request fails with an explicit message when nothing is stored, or returns the stored part with `notices` when a series is incomplete. Requests for points that NASA has already finished are stored at the start of the next query for that place, so submitting again shows the data; area blocks are stored by the hourly `balamIngest`. Any signed-in user can start these requests; a series already in progress is never requested twice, and a request the source rejected can be retried after one hour.
+
+Limits are in `shared/earthdata-catalog.constant.ts` (3 variables, 4 places, 60,000 values per request). Chart statistics come from `earthdata-chart.resolver.ts`: a month is the mean of its valid observations, years need 12 valid months, and the trend is OLS with Newey–West under the usual 10-year / 80 % thresholds. The Meteomatics-sourced air temperature is not offered here, because this mode is labeled as NASA data.
+
+## Running the ingestion locally
+
+`npm run ingest:local` runs the same `process()` then `plan()` as `balamIngest`, from this machine, against the database and providers named in `functions/.env.local` (`DIRECT_URL` or `DATABASE_URL`, `EARTHDATA_USERNAME`, `EARTHDATA_PASSWORD`). Use it for the historical load or whenever the function cannot run:
+
+```bash
+npm --prefix functions run ingest:local -- --backfill --variable ndvi    # request every missing block of one variable
+npm --prefix functions run ingest:local -- --process                     # only store what NASA has finished
+npm --prefix functions run ingest:local -- --watch 10                    # repeat every 10 minutes until nothing is pending
+```
+
+`--force` requests a range again even if it was requested recently. The local run and the Cloud Function can coexist: both are idempotent.
 
 ## Running the historical backfill
 

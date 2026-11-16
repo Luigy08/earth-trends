@@ -26,10 +26,13 @@ export interface StoredCoverage {
 
 /** Read side of the Balam store, used by the HTTP API. */
 export interface BalamReadRepository {
-  zones(withGeometry: boolean): Promise<ZoneSummary[]>;
+  /** All zones (capped), or only the ones named in `ids`. */
+  zones(withGeometry: boolean, ids?: string[]): Promise<ZoneSummary[]>;
   series(filter: SeriesFilter): Promise<ObservationRow[]>;
   trends(filter: { variableId: string; zoneIds?: string[]; source?: string }): Promise<StoredTrend[]>;
   coverage(): Promise<StoredCoverage[]>;
+  /** First and last stored date of each variable in each zone. */
+  seriesCoverage(variableIds: string[], zoneIds: string[], source: string): Promise<{ variableId: string; zoneId: string; firstDate: string; lastDate: string }[]>;
   /** Variables and sources with a request still being processed by the provider. */
   activeIngestions(): Promise<{ variableId: string; source: string }[]>;
 }

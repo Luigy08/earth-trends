@@ -6,19 +6,16 @@
  * Attribution is required wherever the boundaries are shown.
  *
  *   npm run seed:zones                 # needs DIRECT_URL or DATABASE_URL in functions/.env.local
- *   npm run seed:zones -- --dry-run    # download, simplify and report only
+ *   npm run seed:zones -- --dry-run    # download, check and report only
  */
 import centroid from '@turf/centroid';
-import simplify from '@turf/simplify';
+import kinks from '@turf/kinks';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon, Position } from 'geojson';
 import { disconnectPrisma, getPrisma } from '../db/client';
 
 const API = 'https://www.geoboundaries.org/api/current/gbOpen/HND/ADM1/';
 const EXPECTED_ZONES = 18;
-/** AppEEARS receives every polygon in one request, so the collection is kept well under this size. */
-const MAX_COLLECTION_BYTES = 150_000;
-const SIMPLIFY_TOLERANCE_DEGREES = 0.005; // roughly 500 m
-const COORDINATE_DECIMALS = 5; // roughly 1 m
+const COORDINATE_DECIMALS = 6; // roughly 0.1 m: trims the payload without moving any vertex across another edge
 
 type ZoneFeature = Feature<Polygon | MultiPolygon, { shapeName?: string; shapeISO?: string }>;
 
@@ -29,11 +26,39 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 const round = (value: number) => Number(value.toFixed(COORDINATE_DECIMALS));
-const roundRing = (ring: Position[]): Position[] => ring.map(([lon = 0, lat = 0]) => [round(lon), round(lat)]);
-function roundGeometry(geometry: Polygon | MultiPolygon): Polygon | MultiPolygon {
+/** Rounds a ring and drops consecutive duplicates; the ring stays closed. */
+function cleanRing(ring: Position[]): Position[] {
+  const out: Position[] = [];
+  for (const [lon = 0, lat = 0] of ring) {
+    const point: Position = [round(lon), round(lat)];
+    const previous = out[out.length - 1];
+    if (!previous || previous[0] !== point[0] || previous[1] !== point[1]) out.push(point);
+  }
+  return out;
+}
+function cleanGeometry(geometry: Polygon | MultiPolygon): Polygon | MultiPolygon {
   return geometry.type === 'Polygon'
-    ? { type: 'Polygon', coordinates: geometry.coordinates.map(roundRing) }
-    : { type: 'MultiPolygon', coordinates: geometry.coordinates.map((polygon) => polygon.map(roundRing)) };
+    ? { type: 'Polygon', coordinates: geometry.coordinates.map(cleanRing) }
+    : { type: 'MultiPolygon', coordinates: geometry.coordinates.map((polygon) => polygon.map(cleanRing)) };
+}
+
+/**
+ * NASA AppEEARS rejects a whole request when a single polygon is invalid, so a geometry that cannot be
+ * requested is refused here. The published boundaries are stored as they are: simplifying them further
+ * is what introduces self-intersections along intricate coastlines.
+ */
+function geometryProblems(geometry: Polygon | MultiPolygon): string[] {
+  const problems: string[] = [];
+  const rings = geometry.type === 'Polygon' ? geometry.coordinates : geometry.coordinates.flat();
+  for (const ring of rings) {
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (ring.length < 4) problems.push('a ring has fewer than 4 positions');
+    else if (!first || !last || first[0] !== last[0] || first[1] !== last[1]) problems.push('a ring is not closed');
+  }
+  const crossings = kinks({ type: 'Feature', properties: {}, geometry }).features.length;
+  if (crossings) problems.push(`${crossings} self-intersection(s)`);
+  return problems;
 }
 
 async function main() {
@@ -48,16 +73,14 @@ async function main() {
   console.log(`Source: geoBoundaries gbOpen HND ADM1 (${meta.boundaryYearRepresented}) — ${meta.boundarySource}`);
   console.log(`Licence: ${meta.boundaryLicense}`);
 
-  let collection = await getJson<FeatureCollection<Polygon | MultiPolygon, ZoneFeature['properties']>>(meta.simplifiedGeometryGeoJSON);
-  const originalBytes = JSON.stringify(collection).length;
-  if (originalBytes > MAX_COLLECTION_BYTES) {
-    collection = simplify(collection, { tolerance: SIMPLIFY_TOLERANCE_DEGREES, highQuality: true, mutate: false });
-  }
+  const collection = await getJson<FeatureCollection<Polygon | MultiPolygon, ZoneFeature['properties']>>(meta.simplifiedGeometryGeoJSON);
   const zones = collection.features.map((feature) => {
     const id = feature.properties.shapeISO ?? '';
     const name = feature.properties.shapeName ?? '';
     if (!/^HN-[A-Z]{2}$/.test(id) || !name) throw new Error(`Unexpected feature properties: ${JSON.stringify(feature.properties)}`);
-    const geometry = roundGeometry(feature.geometry);
+    const geometry = cleanGeometry(feature.geometry);
+    const problems = geometryProblems(geometry);
+    if (problems.length) throw new Error(`${id} ${name} has an invalid polygon: ${problems.join('; ')}`);
     const [lon = NaN, lat = NaN] = centroid(geometry).geometry.coordinates;
     return { id, name, level: 'ADM1', country: 'HN', centroidLat: round(lat), centroidLon: round(lon), geometry };
   }).sort((a, b) => a.id.localeCompare(b.id));
@@ -65,8 +88,7 @@ async function main() {
   if (zones.length !== EXPECTED_ZONES || new Set(zones.map((z) => z.id)).size !== EXPECTED_ZONES) {
     throw new Error(`Expected ${EXPECTED_ZONES} distinct departments, found ${zones.length}`);
   }
-  const bytes = JSON.stringify(zones.map((z) => z.geometry)).length;
-  console.log(`Geometry: ${originalBytes} bytes downloaded, ${bytes} bytes stored`);
+  console.log(`Geometry: ${JSON.stringify(zones.map((z) => z.geometry)).length} bytes, every polygon valid`);
   for (const zone of zones) console.log(`  ${zone.id}  ${zone.name}  (${zone.centroidLat}, ${zone.centroidLon})`);
 
   if (dryRun) {
@@ -86,6 +108,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  console.error(e instanceof Error ? e.message : e);
   process.exit(1);
 });

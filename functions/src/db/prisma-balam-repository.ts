@@ -8,6 +8,7 @@ import { fromDateString, toDateString } from '../ingest/ingest.resolver';
 
 const ACTIVE: JobStatus[] = ['pending', 'processing'];
 const BATCH_SIZE = 500;
+const ZONE_LIST_LIMIT = 400;
 
 type JobRow = { id: string; variableId: string; source: string; parameter: string; zoneIds: string[]; start: Date; end: Date;
   status: string; queryJobId: string | null; error: string | null; createdAt: Date };
@@ -26,17 +27,28 @@ export class PrismaBalamRepository implements IngestRepository, BalamReadReposit
     return rows.map((row) => ({ ...row, geometry: row.geometry as unknown as ZoneRecord['geometry'] }));
   }
 
-  async lastObservationDate(variableId: string, source: string): Promise<string | null> {
-    const result = await this.prisma.observation.aggregate({ where: { variableId, source }, _max: { date: true } });
+  async getZones(ids: string[]): Promise<ZoneRecord[]> {
+    const rows = await this.prisma.zone.findMany({ where: { id: { in: ids } } });
+    return rows.map((row) => ({ ...row, geometry: row.geometry as unknown as ZoneRecord['geometry'] }));
+  }
+
+  async upsertZone(zone: ZoneRecord): Promise<void> {
+    const { id, ...data } = zone;
+    const values = { ...data, geometry: json(data.geometry) };
+    await this.prisma.zone.upsert({ where: { id }, create: { id, ...values }, update: values });
+  }
+
+  async lastObservationDate(variableId: string, source: string, zoneIds: string[]): Promise<string | null> {
+    const result = await this.prisma.observation.aggregate({ where: { variableId, source, zoneId: { in: zoneIds } }, _max: { date: true } });
     return result._max.date ? toDateString(result._max.date) : null;
   }
 
-  async hasActiveJob(variableId: string, source: string): Promise<boolean> {
-    return (await this.prisma.ingestionJob.count({ where: { variableId, source, status: { in: ACTIVE } } })) > 0;
+  async hasActiveJob(variableId: string, source: string, zoneIds: string[]): Promise<boolean> {
+    return (await this.prisma.ingestionJob.count({ where: { variableId, source, status: { in: ACTIVE }, zoneIds: { hasSome: zoneIds } } })) > 0;
   }
 
-  async latestJobStartingAt(variableId: string, source: string, start: string): Promise<IngestionJobRecord | null> {
-    const row = await this.prisma.ingestionJob.findFirst({ where: { variableId, source, start: fromDateString(start) }, orderBy: { createdAt: 'desc' } });
+  async latestJobStartingAt(variableId: string, source: string, start: string, zoneIds: string[]): Promise<IngestionJobRecord | null> {
+    const row = await this.prisma.ingestionJob.findFirst({ where: { variableId, source, start: fromDateString(start), zoneIds: { hasSome: zoneIds } }, orderBy: { createdAt: 'desc' } });
     return row ? toJob(row) : null;
   }
 
@@ -91,9 +103,10 @@ export class PrismaBalamRepository implements IngestRepository, BalamReadReposit
 
   /* ---------- API reads ---------- */
 
-  async zones(withGeometry: boolean): Promise<ZoneSummary[]> {
+  async zones(withGeometry: boolean, ids?: string[]): Promise<ZoneSummary[]> {
     const rows = await this.prisma.zone.findMany({
-      orderBy: { id: 'asc' },
+      // Administrative zones first, then places stored on demand; the list is capped because places accumulate.
+      ...(ids ? { where: { id: { in: ids } } } : {}), orderBy: [{ level: 'asc' }, { name: 'asc' }], take: ZONE_LIST_LIMIT,
       select: { id: true, name: true, level: true, country: true, centroidLat: true, centroidLon: true, geometry: withGeometry },
     });
     return rows.map(({ geometry, ...zone }) => (withGeometry ? { ...zone, geometry: geometry as unknown as ZoneRecord['geometry'] } : zone));
@@ -128,6 +141,12 @@ export class PrismaBalamRepository implements IngestRepository, BalamReadReposit
       climatology: row.climatology as unknown as ClimatologyMonth[],
       updatedAt: row.updatedAt.toISOString(),
     }));
+  }
+
+  async seriesCoverage(variableIds: string[], zoneIds: string[], source: string): Promise<{ variableId: string; zoneId: string; firstDate: string; lastDate: string }[]> {
+    const groups = await this.prisma.observation.groupBy({ by: ['variableId', 'zoneId'], where: { variableId: { in: variableIds }, zoneId: { in: zoneIds }, source }, _min: { date: true }, _max: { date: true } });
+    return groups.flatMap((group) => (group._min.date && group._max.date
+      ? [{ variableId: group.variableId, zoneId: group.zoneId, firstDate: toDateString(group._min.date), lastDate: toDateString(group._max.date) }] : []));
   }
 
   async activeIngestions(): Promise<{ variableId: string; source: string }[]> {

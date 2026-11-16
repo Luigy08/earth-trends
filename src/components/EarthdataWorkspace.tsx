@@ -20,7 +20,7 @@ const errorText = (cause: unknown) => {
   return message && message !== 'unavailable' ? message : 'The NASA Earthdata store is unavailable. Please try again.';
 };
 
-/** Chat workflow for stored NASA AppEEARS zonal series; mirrors the Giovanni workspace. */
+/** Chat workflow for NASA AppEEARS series at any place on Earth; mirrors the Giovanni workspace. */
 export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
@@ -43,11 +43,6 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
   const zones = useMemo(() => catalog?.zones ?? [], [catalog]);
   const describeVariable = (id: string) => variables.find(option => option.id === id)?.description ?? id;
   const describeZone = (id: string) => zones.find(option => option.id === id)?.name ?? id;
-  const coverage = (id: string) => {
-    const variable = variables.find(option => option.id === id);
-    const state = variable?.stored ? `${variable.stored.firstDate} → ${variable.stored.lastDate}` : 'not stored yet';
-    return `${describeVariable(id)}: ${state}${variable?.ingesting ? ' (NASA is processing a request)' : ''}`;
-  };
   const selectedCount = selectedParameters.length + selectedZones.length;
 
   useEffect(() => {
@@ -64,14 +59,14 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
   }, onSessionUpdated, setError);
 
   const send = async () => {
-    const picked = [selectedParameters.length ? `variables: ${selectedParameters.join(', ')}` : '', selectedZones.length ? `departments: ${selectedZones.join(', ')}` : ''].filter(Boolean).join('; ');
+    const picked = [selectedParameters.length ? `variables: ${selectedParameters.join(', ')}` : '', selectedZones.length ? `stored places: ${selectedZones.map(describeZone).join(', ')}` : ''].filter(Boolean).join('; ');
     const message = input.trim() || (picked ? `Use these selected ${picked}.` : '');
     if (!message || busy) return;
     setBusy(true); setError(''); setSuggestions([]); setSummary(''); setProposal(null); setInput('');
     const history = [...messages, { role: 'user' as const, content: message }];
     setMessages(history);
     try {
-      const prompt = `${history.slice(-8).map(line => `${line.role}: ${line.content}`).join('\n')}\nSelected catalog variables: ${selectedParameters.join(', ') || 'none'}\nSelected zones: ${selectedZones.join(', ') || 'none'}`;
+      const prompt = `${history.slice(-8).map(line => `${line.role}: ${line.content}`).join('\n')}\nSelected catalog variables: ${selectedParameters.join(', ') || 'none'}\nSelected stored places: ${selectedZones.map(id => `${describeZone(id)} [${id}]`).join(', ') || 'none'}`;
       const interpreted = await interpretEarthdata({ query: prompt });
       const optional = interpreted.suggestions?.length ? `\n\n**Optional suggestions**\n\n${interpreted.suggestions.map(item => `- ${item}`).join('\n')}` : '';
       setSummary(interpreted.summary);
@@ -81,7 +76,7 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
         return;
       }
       setProposal(interpreted.spec);
-      setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Ready to review**\n\nYour required details are complete. Submit when ready; the values come from the project store. Anything missing is requested from NASA AppEEARS when you submit, and arrives within hours.${optional}` }]);
+      setMessages(lines => [...lines, { role: 'assistant', content: `**Identified**\n\n${interpreted.summary}\n\n**Ready to review**\n\nYour required details are complete. Submit when ready. Series already stored are shown at once; anything missing is requested from NASA AppEEARS when you submit and usually arrives within minutes to hours, so submit again later to see it.${optional}` }]);
     } catch (cause) { setError(errorText(cause)); }
     finally { setBusy(false); }
   };
@@ -103,17 +98,17 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
 
   const empty = messages.length === 0 && results.length === 0 && !proposal;
   useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, results, busy, empty]);
-  const catalogPicker = <><Tooltip title="Browse NASA Earthdata variables and departments"><span><IconButton size="small" aria-label="Browse NASA Earthdata variables and departments" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedCount} invisible={!selectedCount}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
+  const catalogPicker = <><Tooltip title="Browse NASA Earthdata variables and stored places"><span><IconButton size="small" aria-label="Browse NASA Earthdata variables and stored places" disabled={!loaded} onClick={event => setCatalogAnchor(event.currentTarget)}><Badge color="secondary" badgeContent={selectedCount} invisible={!selectedCount}><TuneOutlined fontSize="small" /></Badge></IconButton></span></Tooltip>
     <Popover open={Boolean(catalogAnchor)} anchorEl={catalogAnchor} onClose={() => setCatalogAnchor(null)} anchorOrigin={{ vertical: 'top', horizontal: 'right' }} transformOrigin={{ vertical: 'bottom', horizontal: 'right' }} slotProps={{ paper: { className: 'catalog-popover' } }}>
       {catalogError && <Alert severity="warning" sx={{ mb: 1.5 }}>The catalog could not be loaded: {catalogError}</Alert>}
       <Autocomplete multiple options={variables} groupBy={option => option.domain} value={variables.filter(option => selectedParameters.includes(option.id))}
         getOptionLabel={option => option.description} loading={catalogBusy} onChange={(_, selected) => setSelectedParameters(selected.slice(0, EARTHDATA_LIMITS.maxVariables).map(option => option.id))}
-        renderInput={params => <TextField {...params} autoFocus label="NASA satellite variables" placeholder="Variable name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxVariables} · ${catalog.variables.length} stored variables` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
-        renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.description}</strong><br />{option.dataset} · {option.temporalResolution} · {option.unit} · {option.stored ? `stored ${option.stored.firstDate} → ${option.stored.lastDate}` : 'not stored yet'}{option.ingesting ? ' · NASA is processing a request' : ''}</span></li>} />
-      <Autocomplete multiple options={zones} value={zones.filter(option => selectedZones.includes(option.id))} sx={{ mt: 2 }}
+        renderInput={params => <TextField {...params} autoFocus label="NASA satellite variables" placeholder="Variable name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxVariables} · ${catalog.variables.length} variables` : catalogBusy ? 'Loading catalog…' : 'Catalog unavailable; check Firebase Functions.'} />}
+        renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.description}</strong><br />{option.dataset} · {option.temporalResolution} · {option.unit} · since {option.since ?? 'product start'}{option.ingesting ? ' · NASA is processing a request' : ''}</span></li>} />
+      <Autocomplete multiple options={zones} groupBy={option => option.kind === 'area' ? 'Areas (average over the polygon)' : 'Places already stored (pixel)'} value={zones.filter(option => selectedZones.includes(option.id))} sx={{ mt: 2 }}
         getOptionLabel={option => option.name} loading={catalogBusy} onChange={(_, selected) => setSelectedZones(selected.slice(0, EARTHDATA_LIMITS.maxZones).map(option => option.id))}
-        renderInput={params => <TextField {...params} label="Departments of Honduras" placeholder="Department name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxZones} · ${catalog.zones.length} departments` : ''} />}
-        renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.name}</strong> · {option.id}</span></li>} />
+        renderInput={params => <TextField {...params} label="Stored places" placeholder="Place name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxZones} · any other place on Earth can be typed in the message` : ''} />}
+        renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.name}</strong>{option.kind === 'point' ? ` · ${option.latitude}, ${option.longitude}` : ` · ${option.country}`}</span></li>} />
     </Popover></>;
 
   return <section className={`chat-workspace ${empty ? 'is-empty' : ''}`} aria-label="NASA Earthdata query assistant">
@@ -121,7 +116,7 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
     {!empty && <div className="chat-thread" aria-live="polite">
       {messages.map((line, index) => <div className={`conversation-message ${line.role}`} key={`${index}-${line.role}`}><div>{line.role === 'assistant' ? <ReactMarkdown>{line.content}</ReactMarkdown> : line.content}</div></div>)}
       {suggestions.length > 0 && <Alert severity="info"><strong>Optional ways to refine your request</strong><ul>{suggestions.map(item => <li key={item}>{item}</li>)}</ul>These suggestions are optional.</Alert>}
-      {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>Departments: {locationLabel || proposal.zones.map(describeZone).join(', ')}</p><p>Dates: {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describeVariable).join(', ')} · Source: NASA AppEEARS (department average)</p><p>Stored coverage · {proposal.variables.map(coverage).join(' · ')}</p></div></div>
+      {proposal && <div className="analysis-proposal meteo-proposal"><div><CheckCircleOutline /><div><strong>Ready to submit</strong><p>{summary}</p><p>Places: {locationLabel || proposal.zones.map(describeZone).join(', ')}</p><p>Dates: {proposal.startDate} → {proposal.endDate}</p><p>Variables: {proposal.variables.map(describeVariable).join(', ')} · Source: NASA AppEEARS</p></div></div>
         <div className="meteo-controls"><Button size="small" endIcon={<ExpandMore />} onClick={() => setShowRequest(value => !value)}>{showRequest ? 'Hide request' : 'Review request'}</Button>
           <Button variant="contained" disabled={busy} onClick={() => void execute()}>{busy ? 'Working…' : 'Submit request'}</Button></div>
         <Collapse in={showRequest}><div className="meteo-request-details"><pre>{JSON.stringify(proposal, null, 2)}</pre></div></Collapse>
@@ -135,10 +130,10 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
     </div>}
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
     <div className="chat-dock">
-      <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Earthdata assistant" maxLength={2000} placeholder="Ask for NASA satellite data: what, which department and when…"
+      <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Earthdata assistant" maxLength={2000} placeholder="Ask for NASA satellite data: what, where on Earth and when…"
         canSubmit={Boolean(input.trim() || selectedCount) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
       {empty && <div className="chat-suggestions" aria-label="Suggested searches">{EARTHDATA_SEARCH_SUGGESTIONS.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
-      <span className="chat-disclaimer">NASA Earthdata values are satellite averages over each department of Honduras, stored from NASA AppEEARS. Department boundaries © OpenStreetMap contributors (geoBoundaries, ODbL). This does not run the trend analysis.</span>
+      <span className="chat-disclaimer">NASA Earthdata values come from NASA AppEEARS: the satellite pixel at a place, or the average over a stored area (boundaries © OpenStreetMap contributors, geoBoundaries, ODbL). New places are requested from NASA and take minutes to hours. This does not run the trend analysis.</span>
     </div>
   </section>;
 }

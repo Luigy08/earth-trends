@@ -121,10 +121,10 @@ export const earthdataQuerySchema = z.object({
   endDate: giovanniDate,
 }).strict().superRefine((spec, ctx) => {
   if (new Set(spec.variables).size !== spec.variables.length) ctx.addIssue({ code: 'custom', message: 'Variables must be distinct.', path: ['variables'] });
-  if (new Set(spec.zones).size !== spec.zones.length) ctx.addIssue({ code: 'custom', message: 'Departments must be distinct.', path: ['zones'] });
+  if (new Set(spec.zones).size !== spec.zones.length) ctx.addIssue({ code: 'custom', message: 'Places must be distinct.', path: ['zones'] });
   if (spec.endDate < spec.startDate) ctx.addIssue({ code: 'custom', message: 'The end date must be on or after the start date.', path: ['endDate'] });
   if (spec.endDate > new Date().toISOString().slice(0, 10)) ctx.addIssue({ code: 'custom', message: 'Stored data are historical; choose an end date up to today.', path: ['endDate'] });
-  if (Number(spec.startDate.slice(0, 4)) < EARTHDATA_LIMITS.firstYear) ctx.addIssue({ code: 'custom', message: `The stored satellite series start in ${EARTHDATA_LIMITS.firstYear}.`, path: ['startDate'] });
+  if (Number(spec.startDate.slice(0, 4)) < EARTHDATA_LIMITS.firstYear) ctx.addIssue({ code: 'custom', message: `The satellite series offered here start in ${EARTHDATA_LIMITS.firstYear}.`, path: ['startDate'] });
 });
 export const earthdataExecuteSchema = z.object({ spec: earthdataQuerySchema, confirmed: z.literal(true) }).strict();
 export const interpretEarthdataSchema = z.object({ query: z.string().trim().min(3).max(16000) }).strict();

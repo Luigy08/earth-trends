@@ -264,22 +264,24 @@ export async function interpretGiovanniQuery(query: string, locations: LocationS
 
 const earthdataIntentSchema = z.object({
   ready: z.boolean(), variables: z.array(z.string()), zones: z.array(z.string()), locationQueries: z.array(z.string()),
+  points: z.array(z.object({ latitude: z.number(), longitude: z.number() })),
   startDate: z.string().nullable(), endDate: z.string().nullable(),
   summary: z.string(), clarificationQuestions: z.array(z.string()), suggestions: z.array(z.string()),
 });
 
 /**
- * Gemini proposes a NASA Earthdata request against the stored catalog. The server keeps only catalog variables
- * and zones, geocodes named places and finds their zone itself, and validates the result. No values are generated.
+ * Gemini proposes a NASA Earthdata request. The server keeps only catalog variables and stored areas,
+ * geocodes named places itself and registers them as point places, and validates the result.
+ * No coordinates, observations or statistics come from the model.
  */
 export async function interpretEarthdataQuery(query: string, locations: LocationSearch, catalog: EarthdataCatalogResponse,
-  zoneAt: (latitude: number, longitude: number) => Promise<EarthdataZone | undefined>): Promise<InterpretEarthdataResponse> {
-  const variables = catalog.variables.map(item => `${item.id}: ${item.description} (${item.temporalResolution}, ${item.unit}, from ${item.since ?? 'product start'}; ${item.stored ? `stored ${item.stored.firstDate} to ${item.stored.lastDate}` : 'not ingested yet'})`).join('\n');
-  const zones = catalog.zones.map(item => `${item.id}: ${item.name}`).join('\n');
+  registerPlace: (location: { latitude: number; longitude: number; name: string; country?: string }) => Promise<EarthdataZone>): Promise<InterpretEarthdataResponse> {
+  const variables = catalog.variables.map(item => `${item.id}: ${item.description} (${item.temporalResolution}, ${item.unit}, from ${item.since ?? 'product start'})`).join('\n');
+  const areas = catalog.zones.filter(item => item.kind === 'area');
   const response = await getAi().generate({
     model: vertexAI.model(CONFIG.geminiModel), config: { temperature: 0, maxOutputTokens: 2048 },
     output: { schema: earthdataIntentSchema },
-    system: `${EARTHDATA_ASSISTANT_PROMPT}\nToday: ${new Date().toISOString().slice(0, 10)}\nCatalog:\n${variables}\nZones (departments of Honduras):\n${zones}`,
+    system: `${EARTHDATA_ASSISTANT_PROMPT}\nToday: ${new Date().toISOString().slice(0, 10)}\nCatalog:\n${variables}\nStored areas:\n${areas.map(item => `${item.id}: ${item.name} (${item.country})`).join('\n') || 'none'}`,
     prompt: JSON.stringify({ query }),
   });
   const value = response.output;
@@ -288,29 +290,33 @@ export async function interpretEarthdataQuery(query: string, locations: Location
   const metadata = { suggestions: value.suggestions.slice(0, 3).map(item => item.slice(0, 300)) };
   const selected = new Map<string, EarthdataZone>();
   for (const id of value.zones) {
-    const zone = catalog.zones.find(item => item.id === id);
+    const zone = areas.find(item => item.id === id);
     if (zone) selected.set(zone.id, zone);
   }
   for (const place of value.locationQueries.slice(0, 4)) {
-    const matches = await locations.search(place, 3);
-    if (matches.length !== 1) {
-      clarificationQuestions.push(matches.length ? `Which place did you mean: ${matches.map(item => `${item.name}, ${item.country ?? ''}`).join('; ')}?` : `I could not locate ${place}. Could you name the department instead?`);
+    const located = await locatePoint(place, locations);
+    if (!located.point) { if (located.question) clarificationQuestions.push(located.question); continue; }
+    const [name = place, ...rest] = (located.locationLabel ?? place).split(', ');
+    const zone = await registerPlace({ ...located.point, name: located.locationLabel ?? name, ...(rest.length ? { country: rest[rest.length - 1] } : {}) });
+    selected.set(zone.id, zone);
+  }
+  for (const point of value.points.slice(0, 4)) {
+    if (!Number.isFinite(point.latitude) || !Number.isFinite(point.longitude) || Math.abs(point.latitude) > 90 || Math.abs(point.longitude) > 180) {
+      clarificationQuestions.push('Those coordinates are out of range. Latitude goes from -90 to 90 and longitude from -180 to 180.');
       continue;
     }
-    const match = matches[0]!;
-    const zone = await zoneAt(match.latitude, match.longitude);
-    if (zone) selected.set(zone.id, zone);
-    else clarificationQuestions.push(`${match.name}${match.country ? `, ${match.country}` : ''} is outside the departments with stored data. Which department of Honduras would you like instead?`);
+    const zone = await registerPlace({ latitude: point.latitude, longitude: point.longitude, name: `${point.latitude.toFixed(3)}, ${point.longitude.toFixed(3)}` });
+    selected.set(zone.id, zone);
   }
   const chosen = [...selected.values()];
-  const withLabel = { ...metadata, ...(chosen.length ? { locationLabel: chosen.map(zone => zone.name).join(', ') } : {}) };
+  const withLabel = { ...metadata, ...(chosen.length ? { locationLabel: chosen.map(zone => `${zone.name} (${zone.kind === 'area' ? 'area mean' : 'pixel'})`).join('; ') } : {}) };
   if (clarificationQuestions.length === 0 && value.variables.length && chosen.length && value.startDate && value.endDate) {
     const known = value.variables.filter(id => catalog.variables.some(item => item.id === id));
     const parsed = earthdataQuerySchema.safeParse({ variables: known, zones: chosen.map(zone => zone.id), startDate: value.startDate, endDate: value.endDate });
     if (parsed.success && known.length === value.variables.length) return { status: 'ready', spec: parsed.data as EarthdataQuerySpec, summary: value.summary, clarificationQuestions: [], ...withLabel };
     if (!parsed.success) clarificationQuestions.push(...parsed.error.issues.slice(0, 4).map(issue => issue.message));
-    else clarificationQuestions.push('One of the variables is not in the stored catalog. Which of the available variables would you like?');
+    else clarificationQuestions.push('One of the variables is not in the catalog. Which of the available variables would you like?');
   }
-  if (!clarificationQuestions.length) clarificationQuestions.push('Tell me which variable, which department and which dates you want to explore.');
+  if (!clarificationQuestions.length) clarificationQuestions.push('Tell me which variable, which place and which dates you want to explore.');
   return { status: 'needs_clarification', summary: value.summary, clarificationQuestions, ...withLabel };
 }

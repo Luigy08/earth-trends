@@ -1,6 +1,8 @@
 import { Alert, Button, CircularProgress } from '@mui/material';
-import { LockOutlined, Public } from '@mui/icons-material';
+import { ArrowDownward, LockOutlined, Public } from '@mui/icons-material';
+import { ABOUT_SECTION_ID } from '../about.constant';
 import { Globe } from './Globe';
+import { ProjectInfo } from './ProjectInfo';
 
 function GoogleMark() {
   return <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
@@ -17,12 +19,14 @@ export function SignInPage({ busy, error, onSignIn }: { busy: boolean; error: st
       <span className="brand signin-brand"><span className="brand-icon"><Public /></span><span>earth trend<span>detective<span className="brand-dot">.</span></span></span></span>
       <span className="eyebrow"><span className="eyebrow-line" />FOLLOW YOUR CURIOSITY. FIND THE EVIDENCE.</span>
       <h1>Climate changes.<br /><em>Ask the questions.</em></h1>
-      <p>Sign in to explore historical temperature and precipitation trends, compare places and periods, and keep your sessions in one place.</p>
+      <p>Sign in to explore historical temperature and precipitation trends, browse NASA Giovanni and Meteomatics data, compare places and periods, and keep your sessions in one place.</p>
       <Button className="google-signin" variant="outlined" size="large" onClick={onSignIn} disabled={busy} startIcon={busy ? <CircularProgress size={16} /> : <GoogleMark />}>{busy ? 'Signing in…' : 'Continue with Google'}</Button>
       {error && <Alert severity="error" className="signin-alert">{error}</Alert>}
       <span className="signin-note"><LockOutlined fontSize="inherit" />Your Google account keeps your sessions and analyses private to you.</span>
+      <Button className="signin-about" href={`#${ABOUT_SECTION_ID}`} endIcon={<ArrowDownward />}>Learn about the project</Button>
     </section>
     <section className="signin-art"><Globe /></section>
   </main>
+  <ProjectInfo />
   <footer className="signin-footer"><span><span className="footer-mark">✳</span> Made to ask better questions.</span><span>Earth Trend Detective <span className="footer-dot">·</span> NASA Space Apps POC</span></footer></div>;
 }

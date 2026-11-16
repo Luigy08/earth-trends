@@ -21,7 +21,7 @@ const errorText = (cause: unknown) => {
   return message && message !== 'unavailable' ? message : 'The NASA Earthdata store is unavailable. Please try again.';
 };
 
-/** Chat workflow for NASA AppEEARS series at any place on Earth; mirrors the Giovanni workspace. */
+/** Chat workflow for NASA AppEEARS series in Honduras and Central America; mirrors the Giovanni workspace. */
 export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { sessionId: string; onSessionUpdated: (session: ConversationSession) => void; tools?: ReactNode }) {
   const threadEnd = useRef<HTMLDivElement>(null);
   const [catalogAnchor, setCatalogAnchor] = useState<HTMLElement | null>(null);
@@ -108,7 +108,7 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
         renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.description}</strong><br />{option.dataset} · {option.temporalResolution} · {option.unit} · since {option.since ?? 'product start'}{option.ingesting ? ' · NASA is processing a request' : ''}</span></li>} />
       <Autocomplete multiple options={zones} groupBy={option => option.kind === 'area' ? 'Areas (average over the polygon)' : 'Places already stored (pixel)'} value={zones.filter(option => selectedZones.includes(option.id))} sx={{ mt: 2 }}
         getOptionLabel={option => option.name} loading={catalogBusy} onChange={(_, selected) => setSelectedZones(selected.slice(0, EARTHDATA_LIMITS.maxZones).map(option => option.id))}
-        renderInput={params => <TextField {...params} label="Stored places" placeholder="Place name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxZones} · any other place on Earth can be typed in the message` : ''} />}
+        renderInput={params => <TextField {...params} label="Stored places" placeholder="Place name" helperText={catalog ? `Optional · up to ${EARTHDATA_LIMITS.maxZones} · any other place in Central America can be typed in the message` : ''} />}
         renderOption={(props, option) => <li {...props} key={option.id}><span><strong>{option.name}</strong>{option.kind === 'point' ? ` · ${option.latitude}, ${option.longitude}` : ` · ${option.country}`}</span></li>} />
     </Popover></>;
 
@@ -133,10 +133,10 @@ export function EarthdataWorkspace({ sessionId, onSessionUpdated, tools }: { ses
     </div>}
     {error && <Alert severity="error" className="chat-alert">{error}</Alert>}
     <div className="chat-dock">
-      <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Earthdata assistant" maxLength={2000} placeholder="Ask for NASA satellite data: what, where on Earth and when…"
+      <ChatComposer value={input} onChange={setInput} onSubmit={() => void send()} ariaLabel="Message the NASA Earthdata assistant" maxLength={2000} placeholder="Ask for NASA satellite data in Honduras and Central America: what, where and when…"
         canSubmit={Boolean(input.trim() || selectedCount) && !busy && !catalogBusy && loaded} tools={tools} actions={<>{catalogPicker}<DictationButton disabled={busy || !loaded} onTranscript={spoken => setInput(value => value ? `${value} ${spoken}` : spoken)} /></>} />
       {empty && <div className="chat-suggestions" aria-label="Suggested searches">{EARTHDATA_SEARCH_SUGGESTIONS.map(suggestion => <Chip key={suggestion} label={suggestion} title={suggestion} variant="outlined" clickable onClick={() => setInput(suggestion)} disabled={busy || !loaded} />)}</div>}
-      <span className="chat-disclaimer">NASA Earthdata values come from NASA AppEEARS: the satellite pixel at a place, or the average over a stored area (boundaries © OpenStreetMap contributors, geoBoundaries, ODbL). New places are requested from NASA and take minutes to hours. This does not run the trend analysis.</span>
+      <span className="chat-disclaimer">This mode covers Honduras and Central America. Values come from NASA AppEEARS: the satellite pixel at a place, or the average over a stored area (boundaries © OpenStreetMap contributors, geoBoundaries, ODbL). New places are requested from NASA and take minutes to hours. This does not run the trend analysis.</span>
     </div>
   </section>;
 }

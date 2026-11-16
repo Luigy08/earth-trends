@@ -8,7 +8,9 @@ export const HONDURAS_UTC_OFFSET_HOURS = -6;
  * Every `parameter` is a binding of its variable in canonical-variables.constant.ts.
  */
 export const INGEST_TARGETS: readonly IngestTarget[] = [
-  { variableId: 'land_surface_temperature_day', parameter: 'appeears/MOD11A1.061/LST_Day_1km:C', mode: 'range', zoneLevel: 'ADM1', since: '2000-02-24', chunkYears: 5, cadenceDays: 1 },
+  // AppEEARS caps the files of one area request: five years of this daily product was 5.6 times over the limit
+  // (rejected 2026-11-15), so it goes out in half-year blocks, about half of what is allowed.
+  { variableId: 'land_surface_temperature_day', parameter: 'appeears/MOD11A1.061/LST_Day_1km:C', mode: 'range', zoneLevel: 'ADM1', since: '2000-02-24', chunkMonths: 6, cadenceDays: 1 },
   { variableId: 'ndvi', parameter: 'appeears/MOD13Q1.061/_250m_16_days_NDVI:idx', mode: 'range', zoneLevel: 'ADM1', since: '2000-02-18', chunkYears: 5, cadenceDays: 16 },
   { variableId: 'evapotranspiration', parameter: 'appeears/MOD16A2GF.061/ET_500m:mmd', mode: 'range', zoneLevel: 'ADM1', since: '2000-01-01', chunkYears: 5, cadenceDays: 8 },
   // SMAP L4 is 3-hourly at source: yearly requests keep each statistics file small.

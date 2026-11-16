@@ -16,10 +16,15 @@ export const unitOf = (parameter: string): string => parameter.slice(parameter.l
 
 /** Splits an inclusive date range into consecutive blocks of at most `chunkYears` years. */
 export function splitRange(start: string, end: string, chunkYears: number): { start: string; end: string }[] {
+  return splitRangeByMonths(start, end, chunkYears * 12);
+}
+
+/** Splits an inclusive date range into consecutive blocks of at most `chunkMonths` months. */
+export function splitRangeByMonths(start: string, end: string, chunkMonths: number): { start: string; end: string }[] {
   const chunks: { start: string; end: string }[] = [];
   for (let cursor = start; cursor <= end; ) {
     const next = fromDateString(cursor);
-    next.setUTCFullYear(next.getUTCFullYear() + chunkYears);
+    next.setUTCMonth(next.getUTCMonth() + Math.max(1, Math.round(chunkMonths)));
     const chunkEnd = addDays(toDateString(next), -1);
     const stop = chunkEnd < end ? chunkEnd : end;
     chunks.push({ start: cursor, end: stop });

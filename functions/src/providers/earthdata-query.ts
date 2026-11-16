@@ -1,7 +1,7 @@
 import type { EarthdataCatalogResponse, EarthdataExecuteResponse, EarthdataQuerySpec } from '../../../shared/types';
 import type { EarthdataVariable, EarthdataZone } from '../../../shared/earthdata.types';
-import { EARTHDATA_ATTRIBUTION, EARTHDATA_LIMITS, EARTHDATA_PROVIDER, EARTHDATA_SOURCE_URL, EARTHDATA_UNIT_LABELS } from '../../../shared/earthdata-catalog.constant';
-import { earthdataSeriesLabel } from '../../../shared/earthdata.resolver';
+import { EARTHDATA_ATTRIBUTION, EARTHDATA_LIMITS, EARTHDATA_PROVIDER, EARTHDATA_REGION, EARTHDATA_SOURCE_URL, EARTHDATA_UNIT_LABELS } from '../../../shared/earthdata-catalog.constant';
+import { earthdataSeriesLabel, inEarthdataRegion } from '../../../shared/earthdata.resolver';
 import type { BalamReadRepository, ZoneSummary } from '../balam/balam.types';
 import { CANONICAL_VARIABLES } from '../datasources/catalog/canonical-variables.constant';
 import { resolveEarthdataChart } from '../earthdata-chart.resolver';
@@ -44,8 +44,8 @@ const toZone = (zone: ZoneSummary): EarthdataZone => ({
 });
 
 /**
- * Reads the stored AppEEARS series: area statistics for the preloaded administrative zones and pixel
- * series for any other place on Earth. A query never waits for NASA: when a series is missing or stops
+ * Reads the stored AppEEARS series for Honduras and Central America: area statistics for the preloaded
+ * administrative zones and pixel series for any other place in the region. A query never waits for NASA: when a series is missing or stops
  * well before the requested period, it asks the ingestion to request it and says so.
  */
 export class EarthdataQueryProvider {
@@ -80,12 +80,14 @@ export class EarthdataQueryProvider {
         return { ...variable, stored: stored ? { firstDate: stored.firstDate, lastDate: stored.lastDate, zones: stored.zones } : null,
           ingesting: active.some(item => item.variableId === variable.id && item.source === SOURCE) };
       }),
-      zones: zones.map(toZone),
+      // Places stored before the region was fixed, or outside it, are not offered.
+      zones: zones.map(toZone).filter(inEarthdataRegion),
     };
   }
 
-  /** Registers a place anywhere on Earth as a point zone, reusing the stored one when it already exists. */
+  /** Registers a place of the region as a point zone, reusing the stored one when it already exists. */
   async place(location: { latitude: number; longitude: number; name: string; country?: string }): Promise<EarthdataZone> {
+    if (!inEarthdataRegion(location)) throw new EarthdataRequestError('invalid-argument', `${location.name} is outside ${EARTHDATA_REGION.name}, the region this workflow covers.`);
     const round = (value: number) => Number(value.toFixed(PLACE_DECIMALS));
     const latitude = round(location.latitude);
     const longitude = round(location.longitude);
@@ -111,6 +113,8 @@ export class EarthdataQueryProvider {
     if (unknownZone) throw new EarthdataRequestError('not-found', `Place "${unknownZone}" is not available. Ask for it by name so it can be located.`);
     const chosenVariables = variables as EarthdataVariable[];
     const chosenZones = zones as EarthdataZone[];
+    const outside = chosenZones.find(zone => !inEarthdataRegion(zone));
+    if (outside) throw new EarthdataRequestError('invalid-argument', `${outside.name} is outside ${EARTHDATA_REGION.name}, the region this workflow covers.`);
     const places = chosenZones.filter(zone => zone.kind === 'point');
 
     // Requests for these places that NASA already finished are stored first, so they show up in this answer.

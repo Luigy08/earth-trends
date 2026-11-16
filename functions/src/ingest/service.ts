@@ -4,7 +4,7 @@ import type { DataSourceRegistry } from '../datasources/registry';
 import type {
   IngestRepository, IngestTarget, IngestionJobRecord, PlacePlanRequest, PlanRequest, PlanSummary, ProcessSummary, TrendOptions, ZoneRecord,
 } from './ingest.types';
-import { addDays, daysBetween, fromDateString, sourceOf, splitRange, toDateString, toObservationRows, trailingWindow } from './ingest.resolver';
+import { addDays, daysBetween, fromDateString, sourceOf, splitRangeByMonths, toDateString, toObservationRows, trailingWindow } from './ingest.resolver';
 import { DEFAULT_CHUNK_YEARS, ERROR_RECHECK_HOURS, INGEST_TARGETS, RECHECK_HOURS } from './targets.constant';
 import { computeTrend } from './trends';
 
@@ -142,7 +142,7 @@ export class IngestService {
     if (!start) return 'The target has no start date';
     if (start > end) return 'Up to date';
     if (!request.from && last && daysBetween(last, end) < (target.cadenceDays ?? 1)) return 'Up to date for the product cadence';
-    const chunks = chunked ? splitRange(start, end, target.chunkYears ?? DEFAULT_CHUNK_YEARS) : [{ start, end }];
+    const chunks = chunked ? splitRangeByMonths(start, end, target.chunkMonths ?? (target.chunkYears ?? DEFAULT_CHUNK_YEARS) * 12) : [{ start, end }];
     return (request.backfill ? chunks : chunks.slice(0, 1)).map((chunk) => ({
       ...chunk,
       time: { start: fromDateString(chunk.start), end: fromDateString(chunk.end), step: target.step },

@@ -14,7 +14,7 @@ import { SessionLoading } from './components/SessionLoading';
 import { MeteomaticsWorkspace } from './components/MeteomaticsWorkspace';
 import { GiovanniWorkspace } from './components/GiovanniWorkspace';
 import { EarthdataWorkspace } from './components/EarthdataWorkspace';
-import { HIDDEN_WORKFLOWS, QUERY_ASSISTANT_NAMES } from './app.constant';
+import { DEFAULT_QUERY_WORKFLOW, HIDDEN_WORKFLOWS, QUERY_ASSISTANT_NAMES } from './app.constant';
 import { WorkflowSelect } from './components/WorkflowSelect';
 import { ChatComposer, ChatGreeting } from './components/ChatComposer';
 import { DictationButton } from './components/DictationButton';
@@ -27,7 +27,7 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const [methodologyOpen, setMethodologyOpen] = useState(false);
-  const [queryWorkflow, setQueryWorkflow] = useState<QueryWorkflow>('meteomatics');
+  const [queryWorkflow, setQueryWorkflow] = useState<QueryWorkflow>(DEFAULT_QUERY_WORKFLOW);
   const { analysis, history, busy: analysisBusy, error: analysisError, submit, retry, select, clear, canRetry } = useAnalysis();
   const restoreAnalysis = useCallback((item: Analysis | null) => { if (item) select(item); else clear(); }, [select, clear]);
   const sessions = useSessions(restoreAnalysis);
@@ -39,7 +39,7 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
     const { workflow } = sessions.current;
     if (workflow === 'meteomatics' || workflow === 'giovanni' || workflow === 'earthdata') { setQueryWorkflow(workflow); return; }
     const isTrend = workflow === 'trend' || Boolean(sessions.current.analysisId) || sessions.messages.length > 0;
-    setQueryWorkflow(isTrend ? 'trend' : 'meteomatics');
+    setQueryWorkflow(isTrend ? 'trend' : DEFAULT_QUERY_WORKFLOW);
   }, [sessions.busy, sessions.current, sessions.messages.length]);
   const navigate = (next: NavigationPage) => { setPage(next); setSidebarOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const confirmAnalysis = async (spec: NonNullable<typeof sessions.proposal>) => {
@@ -52,7 +52,7 @@ export function App({ user, onSignOut }: { user?: User; onSignOut?: () => void }
   const workflowUnavailable = HIDDEN_WORKFLOWS.includes(queryWorkflow);
   const showResults = Boolean(analysis || analysisBusy || analysisError);
   return <div className="app-shell"><a href="#main-content" className="skip-link">Skip to main content</a>
-    <Sidebar page={page} onNavigate={navigate} onMethodology={() => setMethodologyOpen(true)} open={sidebarOpen} onClose={() => setSidebarOpen(false)} sessions={sessions.sessions} currentSessionId={sessions.openingSession?.id ?? sessions.current?.id} onNewSession={() => { void sessions.create(); navigate('explore'); }} onOpenSession={item => { void sessions.open(item); navigate('explore'); }} onRenameSession={(item, title) => { void sessions.rename(item, title); }} onDeleteSession={item => { void sessions.remove(item); }} />
+    <Sidebar onNavigate={navigate} open={sidebarOpen} onClose={() => setSidebarOpen(false)} sessions={sessions.sessions} currentSessionId={sessions.openingSession?.id ?? sessions.current?.id} onNewSession={() => { void sessions.create(); navigate('explore'); }} onOpenSession={item => { void sessions.open(item); navigate('explore'); }} onRenameSession={(item, title) => { void sessions.rename(item, title); }} onDeleteSession={item => { void sessions.remove(item); }} />
     <div className="main-shell"><header className="topbar"><div className="topbar-left"><IconButton className="menu-toggle" onClick={() => setSidebarOpen(true)} aria-label="Open menu"><Menu /></IconButton><span className="topbar-title">{page === 'explore' ? sessions.openingSession?.title ?? sessions.current?.title ?? 'New session' : page === 'analyses' ? 'My analyses' : 'Real-time'}</span></div><div className="topbar-right"><Tooltip title="Connection status"><IconButton size="small" onClick={() => setSetupOpen(true)} aria-label="View configuration"><SettingsOutlined fontSize="small" /></IconButton></Tooltip>{user && <span className="topbar-user"><Tooltip title={user.email ?? user.displayName ?? 'Signed in'}><Avatar src={user.photoURL ?? undefined} alt={user.displayName ?? 'Signed-in user'} slotProps={{ img: { referrerPolicy: 'no-referrer' } }}>{(user.displayName ?? user.email ?? '?').charAt(0).toUpperCase()}</Avatar></Tooltip>{onSignOut && <Tooltip title="Sign out"><IconButton size="small" onClick={onSignOut} aria-label="Sign out"><Logout fontSize="small" /></IconButton></Tooltip>}</span>}</div></header>
       <main id="main-content" className={page === 'explore' ? 'chat-main' : undefined}>{!isConfigured && <div className="connection-banner"><span className="connection-dot" /><span>Explore mode<span className="connection-description"> · Configure Firebase to start exploring live data.</span></span><button onClick={() => setSetupOpen(true)}>Configure connection<ArrowOutward /></button></div>}
         {page === 'explore' && (sessions.openingSession ? <SessionLoading /> : <>

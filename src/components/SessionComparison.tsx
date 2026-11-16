@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Autocomplete, Button, Chip, CircularProgress, MenuItem, TextField } from '@mui/material';
-import { CompareArrows } from '@mui/icons-material';
+import { CompareArrows, DownloadOutlined } from '@mui/icons-material';
 import type { ComparableSeriesSummary, ConversationSession, CorrelationEstimate, SessionComparison as Comparison } from '../../shared/types';
 import { useSessionComparison } from '../analysis/useSessionComparison';
 import { errorMessage } from '../analysis/resolver';
 import { downloadComparisonCsv } from '../comparison.resolver';
+import { printElement } from '../print.resolver';
 import { getComparableSeries } from '../services/firebase';
 import { ComparisonChart } from './ComparisonChart';
+import { ExportPdfButton } from './ExportPdfButton';
 
 const formatNumber = (value: number, digits = 2) => new Intl.NumberFormat('en-US', { maximumFractionDigits: digits }).format(value).replace(/^-(0(\.0+)?)$/, '$1');
 const WORKFLOW_LABELS: Record<string, string> = { meteomatics: 'Meteomatics', giovanni: 'NASA Giovanni', earthdata: 'NASA Earthdata', trend: 'Trend analysis' };
@@ -73,8 +75,10 @@ function EstimateRow({ label, estimate }: { label: string; estimate: Correlation
 
 function ComparisonResult({ comparison }: { comparison: Comparison }) {
   const { a, b, statistics: s, report } = comparison;
+  const section = useRef<HTMLElement>(null);
+  const exportPdf = () => { if (section.current) printElement(section.current, `earth-trend-comparison-${comparison.createdAt.replace(/[^0-9TZ-]/g, '-')}`); };
   const trendText = (series: typeof a) => series.trend ? `${formatNumber(series.trend.slopePerDecade, 3)} per decade (p = ${formatNumber(series.trend.pValue, 3)}${series.trend.significant ? ', significant' : ', not significant'})` : 'Not estimated (needs 10 complete years and 80% coverage)';
-  return <section className="meteo-result comparison-result" aria-label="Session comparison">
+  return <section ref={section} className="meteo-result comparison-result" aria-label="Session comparison">
     <div className="conversation-heading"><div><span className="eyebrow">SESSION COMPARISON</span><h3>Compared with “{b.sessionTitle}”</h3></div><span className="meteo-response-meta">{comparison.commonMonths} common months · {comparison.commonYears} common years</span></div>
     <div className="comparison-legend"><span className="comparison-swatch a" />A · {a.label} ({a.provider})<span className="comparison-swatch b" />B · {b.label} ({b.provider})</div>
     <ComparisonChart comparison={comparison} />
@@ -105,7 +109,10 @@ function ComparisonResult({ comparison }: { comparison: Comparison }) {
       </tbody></table></div>
       <p>Method: Pearson correlation of deseasonalized monthly anomalies over common months, with inference on an effective sample size adjusted for lag-1 autocorrelation (Bretherton et al. 1999) and a Fisher-z interval. At least 36 common months (and 10 common complete years for annual figures) are required: an operational threshold of this POC. Correlation does not establish causation.</p>
     </>}
-    <Button size="small" onClick={() => downloadComparisonCsv(comparison)}>Download monthly CSV (both series)</Button>
+    <div className="result-actions">
+      <ExportPdfButton onClick={exportPdf} />
+      <Button size="small" startIcon={<DownloadOutlined />} onClick={() => downloadComparisonCsv(comparison)}>Download monthly CSV (both series)</Button>
+    </div>
     <details><summary>Provenance</summary><pre>{JSON.stringify({ A: { session: a.sessionTitle, series: a.label, provenance: a.provenance }, B: { session: b.sessionTitle, series: b.label, provenance: b.provenance }, methodologyVersion: comparison.methodologyVersion, comparedAt: comparison.createdAt }, null, 2)}</pre></details>
   </section>;
 }

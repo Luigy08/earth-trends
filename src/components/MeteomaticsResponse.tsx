@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Button, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material';
-import { PrintOutlined } from '@mui/icons-material';
+import { DownloadOutlined } from '@mui/icons-material';
 import type { QueryExecuteResponse } from '../../shared/types';
+import { ExportPdfButton } from './ExportPdfButton';
 import { MeteomaticsChart } from './MeteomaticsChart';
 import { VirtualizedResultsTable } from './VirtualizedResultsTable';
 import { downloadMeteomaticsJson, resolveMeteomaticsResult } from '../meteomatics-query.resolver';
@@ -46,9 +47,11 @@ export function MeteomaticsResponse({ result }: { result: QueryExecuteResponse }
         {normalized.totalRows > PRINT_ROW_LIMIT && <p>Showing the first {PRINT_ROW_LIMIT.toLocaleString('en-US')} of {normalized.totalRows.toLocaleString('en-US')} values. Download the original JSON for the complete data.</p>}
       </div>}
     </> : <p>This format is shown as returned by the API. The payload has not been converted into trend statistics.</p>}
-    <Button size="small" startIcon={<PrintOutlined />} onClick={exportPdf}>Export PDF</Button>
-    {canDownloadJson && <Button size="small" onClick={() => downloadMeteomaticsJson(result.result, result.requestedAt)}>Download original JSON</Button>}
-    <Button size="small" onClick={() => setShowRaw(value => !value)}>{showRaw ? 'Hide original response' : 'Show original response'}</Button>
+    <div className="result-actions">
+      <ExportPdfButton onClick={exportPdf} />
+      {canDownloadJson && <Button size="small" startIcon={<DownloadOutlined />} onClick={() => downloadMeteomaticsJson(result.result, result.requestedAt)}>Download original JSON</Button>}
+      <Button size="small" onClick={() => setShowRaw(value => !value)}>{showRaw ? 'Hide original response' : 'Show original response'}</Button>
+    </div>
     {showRaw && <pre>{raw}</pre>}
     <details><summary>Provenance</summary><pre>{JSON.stringify(result.provenance, null, 2)}</pre></details>
   </section>;

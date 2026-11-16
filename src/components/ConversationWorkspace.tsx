@@ -2,13 +2,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Chip, ToggleButton, ToggleButtonGroup, Tooltip } from '@mui/material';
 import { CheckCircleOutline } from '@mui/icons-material';
 import type { AnalysisSpec, ConversationMessage, HistoricalDataSource } from '../../shared/types';
-import { EXAMPLE_QUERIES, HISTORICAL_SOURCE_OPTIONS } from '../app.constant';
+import { DEFAULT_HISTORICAL_SOURCE, EXAMPLE_QUERIES, HISTORICAL_SOURCE_OPTIONS } from '../app.constant';
 import { ChatComposer, ChatGreeting } from './ChatComposer';
 import { DictationButton } from './DictationButton';
 
 export function ConversationWorkspace({ messages, proposal, busy, error, analysisBusy, submitted, sessionReady, onSend, onConfirm, tools, children }: { messages: ConversationMessage[]; proposal: AnalysisSpec | null; busy: boolean; error: string; analysisBusy: boolean; submitted: boolean; sessionReady: boolean; onSend: (message: string) => void; onConfirm: (spec: AnalysisSpec) => void; tools?: ReactNode; children?: ReactNode }) {
   const [input, setInput] = useState('');
-  const [dataSource, setDataSource] = useState<HistoricalDataSource>('meteomatics');
+  const [dataSource, setDataSource] = useState<HistoricalDataSource>(DEFAULT_HISTORICAL_SOURCE);
   const threadEnd = useRef<HTMLDivElement>(null);
   const empty = messages.length === 0 && !proposal && !children;
   useEffect(() => { if (!empty) threadEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, busy, empty]);
